@@ -1,0 +1,142 @@
+package ebpfbridge
+
+import (
+	"net"
+	"sync"
+
+	"github.com/docker/libnetwork/datastore"
+	"github.com/docker/libnetwork/discoverapi"
+	"github.com/docker/libnetwork/driverapi"
+	"github.com/docker/libnetwork/types"
+)
+
+const networkType = "ebpfbridge"
+
+type networkTable map[string]*network
+type endpointTable map[string]*endpoint
+
+type driver struct {
+	networks networkTable
+	sync.Mutex
+}
+
+type network struct {
+	id        string
+	endpoints endpointTable
+	driver    *driver
+	sync.Mutex
+}
+
+type endpoint struct {
+	id      string
+	nid     string
+	mac     net.HardwareAddr
+	addr    *net.IPNet
+	addrv6  *net.IPNet
+	srcName string
+}
+
+// Init registers a new instance of ebpfbridge driver
+func Init(dc driverapi.DriverCallback, config map[string]interface{}) error {
+	c := driverapi.Capability{
+		DataScope: datastore.LocalScope,
+	}
+	d := &driver{
+		networks: networkTable{},
+	}
+	return dc.RegisterDriver(networkType, d, c)
+}
+
+func (d *driver) NetworkAllocate(id string, option map[string]string, ipV4Data, ipV6Data []driverapi.IPAMData) (map[string]string, error) {
+	return nil, types.NotImplementedErrorf("not implemented")
+}
+
+func (d *driver) NetworkFree(id string) error {
+	return types.NotImplementedErrorf("not implemented")
+}
+
+func (d *driver) EventNotify(etype driverapi.EventType, nid, tableName, key string, value []byte) {
+}
+
+func (d *driver) DecodeTableEntry(tablename string, key string, value []byte) (string, map[string]string) {
+	return "", nil
+}
+
+func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo driverapi.NetworkInfo, ipV4Data, ipV6Data []driverapi.IPAMData) error {
+	d.Lock()
+	defer d.Unlock()
+
+	if _, ok := d.networks[id]; ok {
+		return types.ForbiddenErrorf("only one instance of \"%s\" network is allowed", networkType)
+	}
+
+	n := &network{
+		id:        id,
+		endpoints: endpointTable{},
+		driver:    d,
+	}
+	// Insert new network into the table
+	d.networks[id] = n
+
+	return nil
+}
+
+func (d *driver) DeleteNetwork(nid string) error {
+	d.Lock()
+	defer d.Unlock()
+
+	if _, ok := d.networks[nid]; !ok {
+		return types.ForbiddenErrorf("the network \"%s\" is already not present", nid)
+	}
+
+	//TODO fill it
+	//return types.ForbiddenErrorf("network of type \"%s\" cannot be deleted", networkType)
+}
+
+func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo, epOptions map[string]interface{}) error {
+	return nil
+}
+
+func (d *driver) DeleteEndpoint(nid, eid string) error {
+	return nil
+}
+
+func (d *driver) EndpointOperInfo(nid, eid string) (map[string]interface{}, error) {
+	return make(map[string]interface{}, 0), nil
+}
+
+// Join method is invoked when a Sandbox is attached to an endpoint.
+func (d *driver) Join(nid, eid string, sboxKey string, jinfo driverapi.JoinInfo, options map[string]interface{}) error {
+	return nil
+}
+
+// Leave method is invoked when a Sandbox detaches from an endpoint.
+func (d *driver) Leave(nid, eid string) error {
+	return nil
+}
+
+func (d *driver) ProgramExternalConnectivity(nid, eid string, options map[string]interface{}) error {
+	return nil
+}
+
+func (d *driver) RevokeExternalConnectivity(nid, eid string) error {
+	return nil
+}
+
+func (d *driver) Type() string {
+	return networkType
+}
+
+func (d *driver) IsBuiltIn() bool {
+	return true
+}
+
+// DiscoverNew is a notification for a new discovery event, such as a new node joining a cluster
+func (d *driver) DiscoverNew(dType discoverapi.DiscoveryType, data interface{}) error {
+	return nil
+}
+
+// DiscoverDelete is a notification for a discovery delete event, such as a node leaving a cluster
+func (d *driver) DiscoverDelete(dType discoverapi.DiscoveryType, data interface{}) error {
+	return nil
+}
