@@ -93,12 +93,24 @@ type NetworkDB struct {
 	// bootStrapIP is the list of IPs that can be used to bootstrap
 	// the gossip.
 	bootStrapIP []net.IP
+
+	// lastStatTimestamp is the last timestamp when the stats got printed
+	lastStatTimestamp time.Time
+
+	// qOutMessagesNum collects the number of messagges sent out per network
+	// for stats purposes
+	qOutMessagesNum map[string]int
 }
 
 // PeerInfo represents the peer (gossip cluster) nodes of a network
 type PeerInfo struct {
 	Name string
 	IP   string
+}
+
+// PeerClusterInfo represents the peer (gossip cluster) nodes
+type PeerClusterInfo struct {
+	PeerInfo
 }
 
 type node struct {
@@ -149,6 +161,10 @@ type Config struct {
 	// Keys to be added to the Keyring of the memberlist. Key at index
 	// 0 is the primary key
 	Keys [][]byte
+
+	// StatsPeriodSec the period to use to print queue stats
+	// Default is 5sec
+	StatsPeriodSec int64
 }
 
 // entry defines a table entry
@@ -175,15 +191,16 @@ type entry struct {
 // the caller.
 func New(c *Config) (*NetworkDB, error) {
 	nDB := &NetworkDB{
-		config:         c,
-		indexes:        make(map[int]*radix.Tree),
-		networks:       make(map[string]map[string]*network),
-		nodes:          make(map[string]*node),
-		failedNodes:    make(map[string]*node),
-		leftNodes:      make(map[string]*node),
-		networkNodes:   make(map[string][]string),
-		bulkSyncAckTbl: make(map[string]chan struct{}),
-		broadcaster:    events.NewBroadcaster(),
+		config:          c,
+		indexes:         make(map[int]*radix.Tree),
+		networks:        make(map[string]map[string]*network),
+		nodes:           make(map[string]*node),
+		failedNodes:     make(map[string]*node),
+		leftNodes:       make(map[string]*node),
+		networkNodes:    make(map[string][]string),
+		bulkSyncAckTbl:  make(map[string]chan struct{}),
+		broadcaster:     events.NewBroadcaster(),
+		qOutMessagesNum: make(map[string]int),
 	}
 
 	nDB.indexes[byTable] = radix.New()
@@ -200,6 +217,7 @@ func New(c *Config) (*NetworkDB, error) {
 // instances passed by the caller in the form of addr:port
 func (nDB *NetworkDB) Join(members []string) error {
 	nDB.Lock()
+	nDB.bootStrapIP = make([]net.IP, 0, len(members))
 	for _, m := range members {
 		nDB.bootStrapIP = append(nDB.bootStrapIP, net.ParseIP(m))
 	}
@@ -227,6 +245,20 @@ func (nDB *NetworkDB) Peers(nid string) []PeerInfo {
 				IP:   node.Addr.String(),
 			})
 		}
+	}
+	return peers
+}
+
+// ClusterPeers returns all the gossip cluster peers.
+func (nDB *NetworkDB) ClusterPeers() []PeerInfo {
+	nDB.RLock()
+	defer nDB.RUnlock()
+	peers := make([]PeerInfo, 0, len(nDB.nodes))
+	for _, node := range nDB.nodes {
+		peers = append(peers, PeerInfo{
+			Name: node.Name,
+			IP:   node.Node.Addr.String(),
+		})
 	}
 	return peers
 }
@@ -481,9 +513,8 @@ func (nDB *NetworkDB) JoinNetwork(nid string) error {
 	nodeNetworks[nid].tableBroadcasts = &memberlist.TransmitLimitedQueue{
 		NumNodes: func() int {
 			nDB.RLock()
-			num := len(nDB.networkNodes[nid])
-			nDB.RUnlock()
-			return num
+			defer nDB.RUnlock()
+			return len(nDB.networkNodes[nid])
 		},
 		RetransmitMult: 4,
 	}
