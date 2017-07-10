@@ -5,6 +5,7 @@ package networkdb
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -162,6 +163,13 @@ type Config struct {
 	// 0 is the primary key
 	Keys [][]byte
 
+	// PacketBufferSize is the maximum number of bytes that memberlist will
+	// put in a packet (this will be for UDP packets by default with a NetTransport).
+	// A safe value for this is typically 1400 bytes (which is the default). However,
+	// depending on your network's MTU (Maximum Transmission Unit) you may
+	// be able to increase this to get more content into each gossip packet.
+	PacketBufferSize int
+
 	// StatsPeriodSec the period to use to print queue stats
 	// Default is 5sec
 	StatsPeriodSec int64
@@ -185,6 +193,16 @@ type entry struct {
 	// Number of seconds still left before a deleted table entry gets
 	// removed from networkDB
 	reapTime time.Duration
+}
+
+// DefaultConfig returns a NetworkDB config with default values
+func DefaultConfig() *Config {
+	hostname, _ := os.Hostname()
+	return &Config{
+		NodeName:         hostname,
+		BindAddr:         "0.0.0.0",
+		PacketBufferSize: 1400,
+	}
 }
 
 // New creates a new instance of NetworkDB using the Config passed by

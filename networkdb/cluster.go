@@ -107,6 +107,7 @@ func (nDB *NetworkDB) clusterInit() error {
 	config.Name = nDB.config.NodeName
 	config.BindAddr = nDB.config.BindAddr
 	config.AdvertiseAddr = nDB.config.AdvertiseAddr
+	config.UDPBufferSize = nDB.config.PacketBufferSize
 
 	if nDB.config.BindPort != 0 {
 		config.BindPort = nDB.config.BindPort
@@ -382,7 +383,7 @@ func (nDB *NetworkDB) gossip() {
 
 	for nid, nodes := range networkNodes {
 		mNodes := nDB.mRandomNodes(3, nodes)
-		bytesAvail := udpSendBuf - compoundHeaderOverhead
+		bytesAvail := nDB.config.PacketBufferSize - compoundHeaderOverhead
 
 		nDB.RLock()
 		network, ok := thisNodeNetworks[nid]

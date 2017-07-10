@@ -286,12 +286,12 @@ func (c *controller) agentInit(listenAddr, bindAddrOrInterface, advertiseAddr, d
 	nodeName := hostname + "-" + stringid.TruncateID(stringid.GenerateRandomID())
 	logrus.Info("Gossip cluster hostname ", nodeName)
 
-	nDB, err := networkdb.New(&networkdb.Config{
-		BindAddr:      listenAddr,
-		AdvertiseAddr: advertiseAddr,
-		NodeName:      nodeName,
-		Keys:          keys,
-	})
+	netDBConf := networkdb.DefaultConfig()
+	netDBConf.NodeName = nodeName
+	netDBConf.BindAddr = listenAddr
+	netDBConf.AdvertiseAddr = advertiseAddr
+	netDBConf.Keys = keys
+	nDB, err := networkdb.New(netDBConf)
 
 	if err != nil {
 		return err
