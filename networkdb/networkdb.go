@@ -527,6 +527,12 @@ func (nDB *NetworkDB) JoinNetwork(nid string) error {
 		nodeNetworks = make(map[string]*network)
 		nDB.networks[nDB.config.NodeName] = nodeNetworks
 	}
+	if n, ok := nodeNetworks[nid]; ok {
+		if n.tableBroadcasts.NumQueued() > 0 {
+			logrus.Warnf("JoinNetwork WARN the network %s has still %d messages in the queue while being deleted", nid, n.tableBroadcasts.NumQueued())
+		}
+	}
+
 	nodeNetworks[nid] = &network{id: nid, ltime: ltime}
 	nodeNetworks[nid].tableBroadcasts = &memberlist.TransmitLimitedQueue{
 		NumNodes: func() int {
