@@ -37,7 +37,7 @@ func httpGetFatalError(ip, port, path string) {
 	// logrus.Infof("httpGetFatalError %s:%s%s", ip, port, path)
 	body, err := httpGet(ip, port, path)
 	if err != nil || !strings.Contains(string(body), "OK") {
-		log.Fatalf("Write error %s", err)
+		log.Fatalf("[%s] error %s", path, err)
 	}
 }
 
@@ -52,34 +52,27 @@ func httpGet(ip, port, path string) ([]byte, error) {
 	return body, err
 }
 
-func joinCluster(ip, port string, members []string, doneCh chan error) {
-	body, err := httpGet(ip, port, "/join?members="+strings.Join(members, ","))
+func joinCluster(ip, port string, members []string, doneCh chan int) {
+	httpGetFatalError(ip, port, "/join?members="+strings.Join(members, ","))
 
-	if err != nil || !strings.Contains(string(body), "OK") {
-		logrus.Errorf("joinNetwork %s there was an error: %s %s\n", ip, err, body)
-	}
-	doneCh <- err
-}
-
-func joinNetwork(ip, port, network string, doneCh chan error) {
-	body, err := httpGet(ip, port, "/joinnetwork?nid="+network)
-
-	if err != nil || !strings.Contains(string(body), "OK") {
-		logrus.Errorf("joinNetwork %s there was an error: %s\n", ip, err)
-	}
 	if doneCh != nil {
-		doneCh <- err
+		doneCh <- 0
 	}
 }
 
-func leaveNetwork(ip, port, network string, doneCh chan error) {
-	body, err := httpGet(ip, port, "/leavenetwork?nid="+network)
+func joinNetwork(ip, port, network string, doneCh chan int) {
+	httpGetFatalError(ip, port, "/joinnetwork?nid="+network)
 
-	if err != nil || !strings.Contains(string(body), "OK") {
-		logrus.Errorf("leaveNetwork %s there was an error: %s\n", ip, err)
-	}
 	if doneCh != nil {
-		doneCh <- err
+		doneCh <- 0
+	}
+}
+
+func leaveNetwork(ip, port, network string, doneCh chan int) {
+	httpGetFatalError(ip, port, "/leavenetwork?nid="+network)
+
+	if doneCh != nil {
+		doneCh <- 0
 	}
 }
 
@@ -289,6 +282,64 @@ func ready(ip, port string, doneCh chan error) {
 	doneCh <- nil
 }
 
+func checkTable(ctx context.Context, ips []string, port, networkName, tableName string, expectedEntries int) {
+	startTime := time.Now().UnixNano()
+	var successTime int64
+
+	// Loop for 2 minutes to guartee that the result is stable
+	for {
+		select {
+		case <-ctx.Done():
+			// Validate test success, if the time is set means that all the tables are empty
+			if successTime != 0 {
+				logrus.Infof("Timer expired, the cluster converged in %d msec", time.Duration(successTime-startTime)/time.Millisecond)
+				return
+			}
+			log.Fatal("Test failed, there is still entries in the tables of the nodes")
+		default:
+			logrus.Infof("Checking node table %s", tableName)
+			doneCh := make(chan int, len(ips))
+			for _, ip := range ips {
+				go tableEntriesNumber(ip, servicePort, networkName, tableName, doneCh)
+			}
+
+			nodesWithCorrectEntriesNum := 0
+			for i := len(ips); i > 0; i-- {
+				tableEntries := <-doneCh
+				if tableEntries == expectedEntries {
+					nodesWithCorrectEntriesNum++
+				}
+			}
+			close(doneCh)
+			if nodesWithCorrectEntriesNum == len(ips) {
+				if successTime == 0 {
+					successTime = time.Now().UnixNano()
+					logrus.Infof("Success after %d msec", time.Duration(successTime-startTime)/time.Millisecond)
+				}
+			} else {
+				successTime = 0
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}
+}
+
+func waitWriters(parallelWriters int, mustWrite bool, doneCh chan int) int {
+	var totalKeys int
+	for i := 0; i < parallelWriters; i++ {
+		logrus.Infof("Waiting for %d workers", parallelWriters-i)
+		workerReturn := <-doneCh
+		totalKeys += workerReturn
+		if mustWrite && workerReturn == 0 {
+			log.Fatalf("The worker did not write any key %d == 0", workerReturn)
+		}
+		if !mustWrite && workerReturn != 0 {
+			log.Fatalf("The worker was supposed to return 0 instead %d != 0", workerReturn)
+		}
+	}
+	return totalKeys
+}
+
 // ready
 func doReady(ips []string) {
 	doneCh := make(chan error, len(ips))
@@ -305,7 +356,7 @@ func doReady(ips []string) {
 
 // join
 func doJoin(ips []string) {
-	doneCh := make(chan error, len(ips))
+	doneCh := make(chan int, len(ips))
 	// check all the nodes
 	for i, ip := range ips {
 		members := append([]string(nil), ips[:i]...)
@@ -314,10 +365,7 @@ func doJoin(ips []string) {
 	}
 	// wait for the readiness of all nodes
 	for i := len(ips); i > 0; i-- {
-		err := <-doneCh
-		if err != nil {
-			log.Fatalf("The join failed with error:%s", err)
-		}
+		<-doneCh
 	}
 	close(doneCh)
 }
@@ -342,7 +390,7 @@ func doClusterPeers(ips []string, args []string) {
 
 // join-network networkName
 func doJoinNetwork(ips []string, args []string) {
-	doneCh := make(chan error, len(ips))
+	doneCh := make(chan int, len(ips))
 	// check all the nodes
 	for _, ip := range ips {
 		go joinNetwork(ip, servicePort, args[0], doneCh)
@@ -356,7 +404,7 @@ func doJoinNetwork(ips []string, args []string) {
 
 // leave-network networkName
 func doLeaveNetwork(ips []string, args []string) {
-	doneCh := make(chan error, len(ips))
+	doneCh := make(chan int, len(ips))
 	// check all the nodes
 	for _, ip := range ips {
 		go leaveNetwork(ip, servicePort, args[0], doneCh)
@@ -411,62 +459,15 @@ func doWriteDeleteUniqueKeys(ips []string, args []string) {
 		go writeDeleteUniqueKeys(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
 	}
 
-	var totalKeys int
-	for i := 0; i < parallelWriters; i++ {
-		logrus.Infof("Waiting for %d workers", parallelWriters-i)
-		keysWritten := <-doneCh
-		totalKeys += keysWritten
-		if keysWritten == 0 {
-			log.Fatalf("The worker did not write any key %d == 0", keysWritten)
-		}
-	}
-	close(doneCh)
+	// Sync with all the writers
+	totalKeys := waitWriters(parallelWriters, true, doneCh)
 	cancel()
 	logrus.Infof("Written a total of %d keys on the cluster", totalKeys)
 
 	// check table entries for 2 minutes
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
-	startTime := time.Now().UnixNano()
-	var successTime int64
-
-	time.Sleep(30 * time.Second)
-	// Loop for 2 minutes to guartee that the result is stable
-	for {
-		select {
-		case <-ctx.Done():
-			cancel()
-			// Validate test success, if the time is set means that all the tables are empty
-			if successTime != 0 {
-				logrus.Infof("Timer expired, the cluster converged in %d msec", time.Duration(successTime-startTime)/time.Millisecond)
-				return
-			}
-			log.Fatal("Test failed, there is still entries in the tables of the nodes")
-		default:
-			logrus.Infof("Checking node tables")
-			doneCh = make(chan int, len(ips))
-			for _, ip := range ips {
-				go tableEntriesNumber(ip, servicePort, networkName, tableName, doneCh)
-			}
-
-			nodesWithZeroEntries := 0
-			for i := len(ips); i > 0; i-- {
-				tableEntries := <-doneCh
-				if tableEntries == 0 {
-					nodesWithZeroEntries++
-				}
-			}
-			close(doneCh)
-			if nodesWithZeroEntries == len(ips) {
-				if successTime == 0 {
-					successTime = time.Now().UnixNano()
-					logrus.Infof("Success after %d msec", time.Duration(successTime-startTime)/time.Millisecond)
-				}
-			} else {
-				successTime = 0
-			}
-			time.Sleep(10 * time.Second)
-		}
-	}
+	checkTable(ctx, ips, servicePort, networkName, tableName, 0)
+	cancel()
 }
 
 // write-delete-leave-join networkName tableName numParallelWriters writeTimeSec
@@ -478,6 +479,7 @@ func doWriteDeleteLeaveJoin(ips []string, args []string) {
 
 	// Start parallel writers that will create and delete unique keys
 	doneCh := make(chan int, parallelWriters)
+	defer close(doneCh)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(writeTimeSec)*time.Second)
 	for i := 0; i < parallelWriters; i++ {
 		key := "key-" + strconv.Itoa(i) + "-"
@@ -485,62 +487,60 @@ func doWriteDeleteLeaveJoin(ips []string, args []string) {
 		go writeDeleteLeaveJoin(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
 	}
 
-	var totalKeys int
-	for i := 0; i < parallelWriters; i++ {
-		logrus.Infof("Waiting for %d workers", parallelWriters-i)
-		keysWritten := <-doneCh
-		totalKeys += keysWritten
-		if keysWritten == 0 {
-			log.Fatalf("The worker did not write any key %d == 0", keysWritten)
-		}
-	}
-	close(doneCh)
+	// Sync with all the writers
+	totalKeys := waitWriters(parallelWriters, true, doneCh)
 	cancel()
 	logrus.Infof("Written a total of %d keys on the cluster", totalKeys)
 
 	// check table entries for 2 minutes
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
-	startTime := time.Now().UnixNano()
-	var successTime int64
+	checkTable(ctx, ips, servicePort, networkName, tableName, 0)
+	cancel()
+}
 
-	time.Sleep(30 * time.Second)
-	// Loop for 2 minutes to guartee that the result is stable
-	for {
-		select {
-		case <-ctx.Done():
-			cancel()
-			// Validate test success, if the time is set means that all the tables are empty
-			if successTime != 0 {
-				logrus.Infof("Timer expired, the cluster converged in %d msec", time.Duration(successTime-startTime)/time.Millisecond)
-				return
-			}
-			log.Fatal("Test failed, there is still entries in the tables of the nodes")
-		default:
-			logrus.Infof("Checking node tables")
-			doneCh = make(chan int, len(ips))
-			for _, ip := range ips {
-				go tableEntriesNumber(ip, servicePort, networkName, tableName, doneCh)
-			}
+// write-delete-wait-leave-join networkName tableName numParallelWriters writeTimeSec
+func doWriteDeleteWaitLeaveJoin(ips []string, args []string) {
+	networkName := args[0]
+	tableName := args[1]
+	parallelWriters, _ := strconv.Atoi(args[2])
+	writeTimeSec, _ := strconv.Atoi(args[3])
 
-			nodesWithZeroEntries := 0
-			for i := len(ips); i > 0; i-- {
-				tableEntries := <-doneCh
-				if tableEntries == 0 {
-					nodesWithZeroEntries++
-				}
-			}
-			close(doneCh)
-			if nodesWithZeroEntries == len(ips) {
-				if successTime == 0 {
-					successTime = time.Now().UnixNano()
-					logrus.Infof("Success after %d msec", time.Duration(successTime-startTime)/time.Millisecond)
-				}
-			} else {
-				successTime = 0
-			}
-			time.Sleep(10 * time.Second)
-		}
+	// Start parallel writers that will create and delete unique keys
+	doneCh := make(chan int, parallelWriters)
+	defer close(doneCh)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(writeTimeSec)*time.Second)
+	for i := 0; i < parallelWriters; i++ {
+		key := "key-" + strconv.Itoa(i) + "-"
+		logrus.Infof("Spawn worker: %d on IP:%s", i, ips[i])
+		go writeDeleteLeaveJoin(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
 	}
+
+	// Sync with all the writers
+	totalKeys := waitWriters(parallelWriters, true, doneCh)
+	cancel()
+	logrus.Infof("Written a total of %d keys on the cluster", totalKeys)
+
+	// The writers will leave the network
+	for i := 0; i < parallelWriters; i++ {
+		logrus.Infof("worker leaveNetwork: %d on IP:%s", i, ips[i])
+		go leaveNetwork(ips[i], servicePort, networkName, doneCh)
+	}
+	waitWriters(parallelWriters, false, doneCh)
+
+	// Give some time
+	time.Sleep(100 * time.Millisecond)
+
+	// The writers will join the network
+	for i := 0; i < parallelWriters; i++ {
+		logrus.Infof("worker joinNetwork: %d on IP:%s", i, ips[i])
+		go joinNetwork(ips[i], servicePort, networkName, doneCh)
+	}
+	waitWriters(parallelWriters, false, doneCh)
+
+	// check table entries for 2 minutes
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	checkTable(ctx, ips, servicePort, networkName, tableName, 0)
+	cancel()
 }
 
 var cmdArgChec = map[string]int{
@@ -608,6 +608,9 @@ func Client(args []string) {
 	case "write-delete-leave-join":
 		// write-delete-leave-join networkName tableName numParallelWriters writeTimeSec
 		doWriteDeleteLeaveJoin(ips, commandArgs)
+	case "write-delete-wait-leave-join":
+		// write-delete-wait-leave-join networkName tableName numParallelWriters writeTimeSec
+		doWriteDeleteWaitLeaveJoin(ips, commandArgs)
 	default:
 		log.Fatalf("Command %s not recognized", command)
 	}

@@ -122,7 +122,7 @@ func ready(ctx interface{}, w http.ResponseWriter, r *http.Request) {
 func DebugHTTPForm(r *http.Request) {
 	r.ParseForm()
 	for k, v := range r.Form {
-		fmt.Printf("Form[%q] = %q\n", k, v)
+		logrus.Debugf("Form[%q] = %q\n", k, v)
 	}
 }
 
