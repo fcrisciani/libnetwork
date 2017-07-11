@@ -67,7 +67,9 @@ func joinNetwork(ip, port, network string, doneCh chan error) {
 	if err != nil || !strings.Contains(string(body), "OK") {
 		logrus.Errorf("joinNetwork %s there was an error: %s\n", ip, err)
 	}
-	doneCh <- err
+	if doneCh != nil {
+		doneCh <- err
+	}
 }
 
 func leaveNetwork(ip, port, network string, doneCh chan error) {
@@ -76,7 +78,19 @@ func leaveNetwork(ip, port, network string, doneCh chan error) {
 	if err != nil || !strings.Contains(string(body), "OK") {
 		logrus.Errorf("leaveNetwork %s there was an error: %s\n", ip, err)
 	}
-	doneCh <- err
+	if doneCh != nil {
+		doneCh <- err
+	}
+}
+
+func writeTableKey(ip, port, networkName, tableName, key string) {
+	createPath := "/createentry?nid=" + networkName + "&tname=" + tableName + "&value=v&key="
+	httpGetFatalError(ip, port, createPath+key)
+}
+
+func deleteTableKey(ip, port, networkName, tableName, key string) {
+	deletePath := "/deleteentry?nid=" + networkName + "&tname=" + tableName + "&key="
+	httpGetFatalError(ip, port, deletePath+key)
 }
 
 func clusterPeersNumber(ip, port string, doneCh chan int) {
@@ -121,31 +135,7 @@ func tableEntriesNumber(ip, port, networkName, tableName string, doneCh chan int
 	doneCh <- entriesNum
 }
 
-// func writeAndPropagate(writer, path, key string, waitForNodes []string) {
-// 	writeKey(writer, path)
-//
-// 	nodes := len(waitForNodes)
-// 	ch := make(chan int)
-// 	for i, node := range waitForNodes {
-// 		go checker(i, node, "/getentry?nid=test&tname=table_name&key="+key, "v", ch)
-// 	}
-//
-// 	for {
-// 		fmt.Fprintf(os.Stderr, "Missing %d nodes\n", nodes)
-// 		id := <-ch
-// 		fmt.Fprintf(os.Stderr, "%d done\n", id)
-// 		nodes--
-// 		if nodes == 0 {
-// 			break
-// 		}
-// 	}
-//
-// }
-//
-
-func writeDeleteUniqueKeys(ctx context.Context, ip, port string, key, networkName, tableName string, doneCh chan int) {
-	createPath := "/createentry?nid=" + networkName + "&tname=" + tableName + "&value=v&key="
-	deletePath := "/deleteentry?nid=" + networkName + "&tname=" + tableName + "&key="
+func writeDeleteUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan int) {
 	for x := 0; ; x++ {
 		select {
 		case <-ctx.Done():
@@ -155,226 +145,40 @@ func writeDeleteUniqueKeys(ctx context.Context, ip, port string, key, networkNam
 		default:
 			k := key + strconv.Itoa(x)
 			// write key
-			httpGetFatalError(ip, port, createPath+k)
+			writeTableKey(ip, port, networkName, tableName, k)
 			// give time to send out key writes
 			time.Sleep(100 * time.Millisecond)
 			// delete key
-			httpGetFatalError(ip, port, deletePath+k)
+			deleteTableKey(ip, port, networkName, tableName, k)
 		}
 	}
 }
 
-// func doWriteDeleteLeaveJoin(ctx context.Context, port, key string, doneCh chan int) {
-// 	x := 0
-// 	createPath := "/createentry?nid=test&tname=table_name&value=v&key="
-// 	deletePath := "/deleteentry?nid=test&tname=table_name&key="
-//
-// 	fmt.Fprintf(os.Stderr, "%s Started\n", key)
-//
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			fmt.Fprintf(os.Stderr, "Exiting after having written %s keys\n", strconv.Itoa(x))
-// 			doneCh <- x
-// 			return
-// 		default:
-// 			k := key + "-" + strconv.Itoa(x)
-// 			// write key
-// 			// fmt.Fprintf(os.Stderr, "Write %s\n", createPath+k)
-// 			err := writeKey(port, createPath+k)
-// 			if err != nil {
-// 				//error
-// 			}
-// 			// delete key
-// 			// fmt.Fprintf(os.Stderr, "Delete %s\n", deletePath+k)
-// 			err = writeKey(port, deletePath+k)
-// 			if err != nil {
-// 				//error
-// 			}
-// 			x++
-// 			time.Sleep(100 * time.Millisecond)
-// 			// leave network
-// 			// fmt.Fprintf(os.Stderr, "%s Leave network\n", key)
-// 			err = leaveNetwork("localhost", port, "test")
-// 			if err != nil {
-// 				//error
-// 			}
-// 			time.Sleep(100 * time.Millisecond)
-// 			// join network
-// 			// fmt.Fprintf(os.Stderr, "%s Join network\n", key)
-// 			err = joinNetwork("localhost", port, "test")
-// 			if err != nil {
-// 				//error
-// 			}
-// 		}
-// 		// time.Sleep(200 * time.Millisecond)
-// 	}
-// }
-//
-// func doWriteDeleteLeaveJoinSingle(ctx context.Context, port, key string, doneCh chan int) {
-// 	x := 0
-// 	createPath := "/createentry?nid=test&tname=table_name&value=v&key="
-// 	// deletePath := "/deleteentry?nid=test&tname=table_name&key="
-//
-// 	fmt.Fprintf(os.Stderr, "%s Started\n", key)
-//
-// 	numEntries := 1000
-// 	// Create 1000 entries
-// 	for i := 0; i < numEntries; i++ {
-// 		k := key + "-" + strconv.Itoa(x)
-// 		// write key
-// 		// fmt.Fprintf(os.Stderr, "Write %s\n", createPath+k)
-// 		err := writeKey(port, createPath+k)
-// 		if err != nil {
-// 			//error
-// 		}
-// 		x++
-// 	}
-// 	// Delete all of them
-// 	x = 0
-// 	// for i := 0; i < 100; i++ {
-// 	// 	k := key + "-" + strconv.Itoa(x)
-// 	// 	// write key
-// 	// 	// fmt.Fprintf(os.Stderr, "Write %s\n", createPath+k)
-// 	// 	err := writeKey(port, deletePath+k)
-// 	// 	if err != nil {
-// 	// 		//error
-// 	// 	}
-// 	// 	x++
-// 	// }
-// 	// Leave the network
-// 	err := leaveNetwork("localhost", port, "test")
-// 	if err != nil {
-// 		//error
-// 	}
-// 	time.Sleep(200 * time.Millisecond)
-// 	// Join the network
-// 	err = joinNetwork("localhost", port, "test")
-// 	if err != nil {
-// 		//error
-// 	}
-// 	fmt.Fprintf(os.Stderr, "Exiting after having done the procedure\n")
-// 	doneCh <- x
-// 	return
-// }
-//
-// func writeAndDelete(writerList []string, keyBase string) {
-// 	workers := len(writerList)
-// 	doneCh := make(chan int)
-// 	ctx, cancel := context.WithCancel(context.Background())
-//
-// 	// start the write in parallel
-// 	for _, w := range writerList {
-// 		key := keyBase + w
-// 		fmt.Fprintf(os.Stderr, "Spawn worker: %s\n", w)
-// 		go doWriteDelete(ctx, w, key, doneCh)
-// 	}
-// 	time.Sleep(10 * time.Second)
-// 	cancel()
-// 	for workers > 0 {
-// 		fmt.Fprintf(os.Stderr, "Remains: %d workers\n", workers)
-// 		<-doneCh
-// 		workers--
-// 	}
-//
-// 	// Stop when stable
-// 	stableResult := 10
-// 	start := time.Now().UnixNano()
-// 	for {
-// 		time.Sleep(2 * time.Second)
-// 		fmt.Fprintf(os.Stderr, "Checking node tables\n")
-// 		var equal int
-// 		var prev []byte
-// 		for i, w := range writerList {
-// 			path := "/gettable?nid=test&tname=table_name"
-// 			body, err := httpGet("localhost", string(w), path)
-// 			if err != nil {
-// 				fmt.Fprintf(os.Stderr, "there was an error: %s\n", err)
-// 				return
-// 			}
-// 			_, line, _ := bufio.ScanLines(body, false)
-// 			fmt.Fprintf(os.Stderr, "%s writer ret: %s\n", w, line)
-//
-// 			if i > 0 {
-// 				if bytes.Equal(prev, body) {
-// 					equal++
-// 				} else {
-// 					equal = 0
-// 					stableResult = 10
-// 				}
-// 			}
-// 			prev = body
-// 			if equal == len(writerList)-1 {
-// 				stableResult--
-// 				if stableResult == 0 {
-// 					opTime := time.Now().UnixNano() - start
-// 					fmt.Fprintf(os.Stderr, "the output is stable after: %dms\n", opTime/1000000)
-// 					return
-// 				}
-// 			}
-// 		}
-// 	}
-// }
+func writeDeleteLeaveJoin(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan int) {
+	for x := 0; ; x++ {
+		select {
+		case <-ctx.Done():
+			logrus.Infof("Exiting after having written %s keys", strconv.Itoa(x))
+			doneCh <- x
+			return
+		default:
+			k := key + strconv.Itoa(x)
+			// write key
+			writeTableKey(ip, port, networkName, tableName, k)
+			time.Sleep(100 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
+			// delete key
+			deleteTableKey(ip, port, networkName, tableName, k)
+			// give some time
+			time.Sleep(100 * time.Millisecond)
+			// leave network
+			leaveNetwork(ip, port, networkName, nil)
+			// join network
+			joinNetwork(ip, port, networkName, nil)
+		}
+	}
+}
 
-//
-// func writeAndDeleteLeaveJoin(writerList []string, keyBase string) {
-// 	workers := len(writerList)
-// 	doneCh := make(chan int)
-// 	ctx, cancel := context.WithCancel(context.Background())
-//
-// 	// start the write in parallel
-// 	for _, w := range writerList {
-// 		key := keyBase + w
-// 		fmt.Fprintf(os.Stderr, "Spawn worker: %s\n", w)
-// 		go doWriteDeleteLeaveJoin(ctx, w, key, doneCh)
-// 	}
-// 	time.Sleep(5 * time.Second)
-// 	cancel()
-// 	for workers > 0 {
-// 		fmt.Fprintf(os.Stderr, "Remains: %d workers\n", workers)
-// 		<-doneCh
-// 		workers--
-// 	}
-//
-// 	// Stop when stable
-// 	stableResult := 3
-// 	start := time.Now().UnixNano()
-// 	for {
-// 		time.Sleep(2 * time.Second)
-// 		fmt.Fprintf(os.Stderr, "Checking node tables\n")
-// 		var equal int
-// 		var prev []byte
-// 		for i, w := range writerList {
-// 			path := "/gettable?nid=test&tname=table_name"
-// 			body, err := httpGet("localhost", string(w), path)
-// 			if err != nil {
-// 				fmt.Fprintf(os.Stderr, "there was an error: %s\n", err)
-// 				return
-// 			}
-// 			_, line, _ := bufio.ScanLines(body, false)
-// 			fmt.Fprintf(os.Stderr, "%s writer ret: %s\n", w, line)
-//
-// 			if i > 0 {
-// 				if bytes.Equal(prev, body) {
-// 					equal++
-// 				} else {
-// 					equal = 0
-// 					stableResult = 3
-// 				}
-// 			}
-// 			prev = body
-// 			if equal == len(writerList)-1 {
-// 				stableResult--
-// 				if stableResult == 0 {
-// 					opTime := time.Now().UnixNano() - start
-// 					fmt.Fprintf(os.Stderr, "the output is stable after: %dms\n", opTime/1000000)
-// 					return
-// 				}
-// 			}
-// 		}
-// 	}
-//
-// }
 //
 // func reproIssue(writerList []string, keyBase string) {
 // 	workers := len(writerList)
@@ -603,8 +407,82 @@ func doWriteDeleteUniqueKeys(ips []string, args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(writeTimeSec)*time.Second)
 	for i := 0; i < parallelWriters; i++ {
 		key := "key-" + strconv.Itoa(i) + "-"
-		logrus.Infof("Spawn worker: %d", i)
-		go writeDeleteUniqueKeys(ctx, ips[i], servicePort, key, networkName, tableName, doneCh)
+		logrus.Infof("Spawn worker: %d on IP:%s", i, ips[i])
+		go writeDeleteUniqueKeys(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
+	}
+
+	var totalKeys int
+	for i := 0; i < parallelWriters; i++ {
+		logrus.Infof("Waiting for %d workers", parallelWriters-i)
+		keysWritten := <-doneCh
+		totalKeys += keysWritten
+		if keysWritten == 0 {
+			log.Fatalf("The worker did not write any key %d == 0", keysWritten)
+		}
+	}
+	close(doneCh)
+	cancel()
+	logrus.Infof("Written a total of %d keys on the cluster", totalKeys)
+
+	// check table entries for 2 minutes
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	startTime := time.Now().UnixNano()
+	var successTime int64
+
+	time.Sleep(30 * time.Second)
+	// Loop for 2 minutes to guartee that the result is stable
+	for {
+		select {
+		case <-ctx.Done():
+			cancel()
+			// Validate test success, if the time is set means that all the tables are empty
+			if successTime != 0 {
+				logrus.Infof("Timer expired, the cluster converged in %d msec", time.Duration(successTime-startTime)/time.Millisecond)
+				return
+			}
+			log.Fatal("Test failed, there is still entries in the tables of the nodes")
+		default:
+			logrus.Infof("Checking node tables")
+			doneCh = make(chan int, len(ips))
+			for _, ip := range ips {
+				go tableEntriesNumber(ip, servicePort, networkName, tableName, doneCh)
+			}
+
+			nodesWithZeroEntries := 0
+			for i := len(ips); i > 0; i-- {
+				tableEntries := <-doneCh
+				if tableEntries == 0 {
+					nodesWithZeroEntries++
+				}
+			}
+			close(doneCh)
+			if nodesWithZeroEntries == len(ips) {
+				if successTime == 0 {
+					successTime = time.Now().UnixNano()
+					logrus.Infof("Success after %d msec", time.Duration(successTime-startTime)/time.Millisecond)
+				}
+			} else {
+				successTime = 0
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}
+}
+
+// write-delete-leave-join networkName tableName numParallelWriters writeTimeSec
+func doWriteDeleteLeaveJoin(ips []string, args []string) {
+	networkName := args[0]
+	tableName := args[1]
+	parallelWriters, _ := strconv.Atoi(args[2])
+	writeTimeSec, _ := strconv.Atoi(args[3])
+
+	// Start parallel writers that will create and delete unique keys
+	doneCh := make(chan int, parallelWriters)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(writeTimeSec)*time.Second)
+	for i := 0; i < parallelWriters; i++ {
+		key := "key-" + strconv.Itoa(i) + "-"
+		logrus.Infof("Spawn worker: %d on IP:%s", i, ips[i])
+		go writeDeleteLeaveJoin(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
 	}
 
 	var totalKeys int
@@ -727,6 +605,9 @@ func Client(args []string) {
 	case "write-delete-unique-keys":
 		// write-delete-unique-keys networkName tableName numParallelWriters writeTimeSec
 		doWriteDeleteUniqueKeys(ips, commandArgs)
+	case "write-delete-leave-join":
+		// write-delete-leave-join networkName tableName numParallelWriters writeTimeSec
+		doWriteDeleteLeaveJoin(ips, commandArgs)
 	default:
 		log.Fatalf("Command %s not recognized", command)
 	}
