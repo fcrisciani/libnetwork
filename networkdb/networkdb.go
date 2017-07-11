@@ -3,7 +3,6 @@ package networkdb
 //go:generate protoc -I.:../vendor/github.com/gogo/protobuf --gogo_out=import_path=github.com/docker/libnetwork/networkdb,Mgogoproto/gogo.proto=github.com/gogo/protobuf/gogoproto:. networkdb.proto
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
@@ -559,6 +558,12 @@ func (nDB *NetworkDB) JoinNetwork(nid string) error {
 		nodeNetworks = make(map[string]*network)
 		nDB.networks[nDB.config.NodeName] = nodeNetworks
 	}
+	if n, ok := nodeNetworks[nid]; ok {
+		if n.tableBroadcasts.NumQueued() > 0 {
+			logrus.Warnf("JoinNetwork WARN the network %s has still %d messages in the queue while being deleted", nid, n.tableBroadcasts.NumQueued())
+		}
+	}
+
 	nodeNetworks[nid] = &network{id: nid, ltime: ltime}
 	nodeNetworks[nid].tableBroadcasts = &memberlist.TransmitLimitedQueue{
 		NumNodes: func() int {
@@ -679,39 +684,4 @@ func (nDB *NetworkDB) updateLocalNetworkTime() {
 	for _, n := range nDB.networks[nDB.config.NodeName] {
 		n.ltime = ltime
 	}
-}
-
-func (nDB *NetworkDB) Initialize(context.Context, *api.Configuration) (*api.Result, error) {
-
-	return &api.Result{}, nil
-}
-
-func (nDB *NetworkDB) JoinCluster(ctx context.Context, in *api.JoinClusterReq) (*api.Result, error) {
-
-	return &api.Result{}, nil
-}
-
-func (nDB *NetworkDB) JoinGroup(context.Context, *api.GroupID) (*api.Result, error) {
-
-	return &api.Result{}, nil
-}
-func (nDB *NetworkDB) LeaveGroup(context.Context, *api.GroupID) (*api.Result, error) {
-
-	return &api.Result{}, nil
-}
-func (nDB *NetworkDB) CreateEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
-
-	return &api.Result{}, nil
-}
-func (nDB *NetworkDB) ReadEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
-
-	return &api.Result{}, nil
-}
-func (nDB *NetworkDB) UpdateEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
-
-	return &api.Result{}, nil
-}
-func (nDB *NetworkDB) DeleteEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
-
-	return &api.Result{}, nil
 }

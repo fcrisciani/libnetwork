@@ -310,6 +310,9 @@ func (nDB *NetworkDB) reapNetworks() {
 		for id, n := range nn {
 			if n.leaving {
 				if n.reapTime <= 0 {
+					if n.tableBroadcasts != nil && n.tableBroadcasts.NumQueued() != 0 {
+						logrus.Warnf("reapNetworks WARN the network %s has still %d messages in the queue while being deleted", id, n.tableBroadcasts.NumQueued())
+					}
 					delete(nn, id)
 					continue
 				}
@@ -348,6 +351,8 @@ func (nDB *NetworkDB) reapTableEntries() {
 		tname := params[0]
 		nid := params[1]
 		key := params[2]
+
+		logrus.Debugf("Reap time expired deleting %s %s", nid, key)
 
 		if _, ok := nDB.indexes[byTable].Delete(fmt.Sprintf("/%s/%s/%s", tname, nid, key)); !ok {
 			logrus.Errorf("Could not delete entry in table %s with network id %s and key %s as it does not exist", tname, nid, key)
