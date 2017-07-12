@@ -144,8 +144,8 @@ func (nDB *NetworkDB) handleNetworkEvent(nEvent *NetworkEvent, tcpSync bool) boo
 	}
 
 	nDB.Lock()
+	defer nDB.Unlock()
 	defer func() {
-		nDB.Unlock()
 		// When a node leaves a network on the last task removal cleanup the
 		// local entries for this network & node combination. When the tasks
 		// on a network are removed we could have missed the gossip updates.
@@ -154,7 +154,7 @@ func (nDB *NetworkDB) handleNetworkEvent(nEvent *NetworkEvent, tcpSync bool) boo
 		//
 		// deleteNodeNetworkEntries takes nDB lock.
 		if flushEntries {
-			nDB.deleteNodeNetworkEntries(nEvent.NetworkID, nEvent.NodeName)
+			nDB.deleteNodeNetworkEntries(nEvent.NetworkID, nEvent.NodeName, false)
 		}
 	}()
 
@@ -220,9 +220,18 @@ func (nDB *NetworkDB) handleTableEvent(tEvent *TableEvent, tcpSync bool) bool {
 	nDB.RLock()
 	networks := nDB.networks[nDB.config.NodeName]
 	network, ok := networks[tEvent.NetworkID]
+	// Check if the owner of the event is still part of the network
+	nodes := nDB.networkNodes[tEvent.NetworkID]
+	var nodePresent bool
+	for _, node := range nodes {
+		if node == tEvent.NodeName {
+			nodePresent = true
+			break
+		}
+	}
 	nDB.RUnlock()
-	if !ok || network.leaving {
-		// I'm out of the network so do not propagate
+	if !ok || network.leaving || !nodePresent {
+		// I'm out of the network OR the event owner is not anymore part of the network so do not propagate
 		return false
 	}
 

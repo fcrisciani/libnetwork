@@ -386,7 +386,14 @@ func (nDB *NetworkDB) gossip() {
 
 	printStats := time.Since(nDB.lastStatTimestamp) >= time.Duration(nDB.config.StatsPeriodSec)*time.Second
 
+	if printStats {
+		logrus.Infof("gossip this node participate to networks:%v", thisNodeNetworks)
+	}
+
 	for nid, nodes := range networkNodes {
+		if printStats {
+			logrus.Infof("Networks:%s, peers:%d", nid, len(nodes))
+		}
 		mNodes := nDB.mRandomNodes(3, nodes)
 		bytesAvail := nDB.config.PacketBufferSize - compoundHeaderOverhead
 
@@ -409,13 +416,12 @@ func (nDB *NetworkDB) gossip() {
 		}
 
 		msgs := broadcastQ.GetBroadcasts(compoundOverhead, bytesAvail)
-		if len(msgs) == 0 {
-			continue
-		}
-
 		nDB.qOutMessagesNum[nid] += len(msgs)
 		if printStats {
 			logrus.Infof("nDB queue stats net:%s qLen:%d netPeers:%d netMsg/s:%d", nid, broadcastQ.NumQueued(), broadcastQ.NumNodes(), nDB.qOutMessagesNum[nid]/int(nDB.config.StatsPeriodSec))
+		}
+		if len(msgs) == 0 {
+			continue
 		}
 
 		// Create a compound message
@@ -431,7 +437,7 @@ func (nDB *NetworkDB) gossip() {
 			}
 
 			// Send the compound message
-			if err := nDB.memberlist.SendToUDP(&mnode.Node, compound); err != nil {
+			if err := nDB.memberlist.SendBestEffort(&mnode.Node, compound); err != nil {
 				logrus.Errorf("Failed to send gossip to %s: %s", mnode.Addr, err)
 			}
 		}

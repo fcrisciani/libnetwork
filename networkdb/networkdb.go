@@ -429,8 +429,7 @@ func (nDB *NetworkDB) deleteNetworkEntriesForNode(deletedNode string) {
 	nDB.Unlock()
 }
 
-func (nDB *NetworkDB) deleteNodeNetworkEntries(nid, node string) {
-	nDB.Lock()
+func (nDB *NetworkDB) deleteNodeNetworkEntries(nid, node string, flush bool) {
 	nDB.indexes[byNetwork].WalkPrefix(fmt.Sprintf("/%s", nid),
 		func(path string, v interface{}) bool {
 			oldEntry := v.(*entry)
@@ -439,7 +438,13 @@ func (nDB *NetworkDB) deleteNodeNetworkEntries(nid, node string) {
 			tname := params[1]
 			key := params[2]
 
-			if oldEntry.node != node {
+			// If it is not a networkLeave and is a different owner nothing to do
+			if !flush && oldEntry.node != node {
+				return false
+			}
+
+			// If it is already marked for deletion nothing to do
+			if oldEntry.deleting {
 				return false
 			}
 
@@ -451,13 +456,24 @@ func (nDB *NetworkDB) deleteNodeNetworkEntries(nid, node string) {
 				reapTime: reapInterval,
 			}
 
-			nDB.indexes[byTable].Insert(fmt.Sprintf("/%s/%s/%s", tname, nid, key), entry)
-			nDB.indexes[byNetwork].Insert(fmt.Sprintf("/%s/%s/%s", nid, tname, key), entry)
+			// we are here is it a flush OR the owner is actually matching
+			if oldEntry.node == node {
+				if flush {
+					// TODO fcrisciani: this can be removed if there is no way to leave the network
+					// without doing a delete of all the objects
+					entry.ltime++
+				}
+				nDB.indexes[byTable].Insert(fmt.Sprintf("/%s/%s/%s", tname, nid, key), entry)
+				nDB.indexes[byNetwork].Insert(fmt.Sprintf("/%s/%s/%s", nid, tname, key), entry)
+			} else {
+				// This is a flush, all the entries of other nodes can be safely removed
+				nDB.indexes[byTable].Delete(fmt.Sprintf("/%s/%s/%s", tname, nid, key))
+				nDB.indexes[byNetwork].Delete(fmt.Sprintf("/%s/%s/%s", nid, tname, key))
+			}
 
 			nDB.broadcaster.Write(makeEvent(opDelete, tname, nid, key, entry.value))
 			return false
 		})
-	nDB.Unlock()
 }
 
 func (nDB *NetworkDB) deleteNodeTableEntries(node string) {
@@ -572,37 +588,12 @@ func (nDB *NetworkDB) LeaveNetwork(nid string) error {
 
 	nDB.Lock()
 	defer nDB.Unlock()
-	var (
-		paths   []string
-		entries []*entry
-	)
 
+	// Remove myself from the list of the nodes participating to the network
 	nDB.deleteNetworkNode(nid, nDB.config.NodeName)
 
-	nwWalker := func(path string, v interface{}) bool {
-		entry, ok := v.(*entry)
-		if !ok {
-			return false
-		}
-		paths = append(paths, path)
-		entries = append(entries, entry)
-		return false
-	}
-
-	nDB.indexes[byNetwork].WalkPrefix(fmt.Sprintf("/%s", nid), nwWalker)
-	for _, path := range paths {
-		params := strings.Split(path[1:], "/")
-		tname := params[1]
-		key := params[2]
-
-		if _, ok := nDB.indexes[byTable].Delete(fmt.Sprintf("/%s/%s/%s", tname, nid, key)); !ok {
-			logrus.Errorf("Could not delete entry in table %s with network id %s and key %s as it does not exist", tname, nid, key)
-		}
-
-		if _, ok := nDB.indexes[byNetwork].Delete(fmt.Sprintf("/%s/%s/%s", nid, tname, key)); !ok {
-			logrus.Errorf("Could not delete entry in network %s with table name %s and key %s as it does not exist", nid, tname, key)
-		}
-	}
+	// Update all the local entries marking them for deletion and delete all the remote entries
+	nDB.deleteNodeNetworkEntries(nid, nDB.config.NodeName, true)
 
 	nodeNetworks, ok := nDB.networks[nDB.config.NodeName]
 	if !ok {
@@ -615,6 +606,7 @@ func (nDB *NetworkDB) LeaveNetwork(nid string) error {
 	}
 
 	n.ltime = ltime
+	n.reapTime = reapInterval
 	n.leaving = true
 	return nil
 }

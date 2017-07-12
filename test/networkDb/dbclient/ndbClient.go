@@ -529,7 +529,7 @@ func doWriteDeleteWaitLeaveJoin(ips []string, args []string) {
 	for i := 0; i < parallelWriters; i++ {
 		key := "key-" + strconv.Itoa(i) + "-"
 		logrus.Infof("Spawn worker: %d on IP:%s", i, ips[i])
-		go writeDeleteLeaveJoin(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
+		go writeDeleteUniqueKeys(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
 	}
 
 	// Sync with all the writers
