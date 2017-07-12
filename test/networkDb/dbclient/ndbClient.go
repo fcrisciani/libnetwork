@@ -128,6 +128,23 @@ func tableEntriesNumber(ip, port, networkName, tableName string, doneCh chan int
 	doneCh <- entriesNum
 }
 
+func writeUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan int) {
+	for x := 0; ; x++ {
+		select {
+		case <-ctx.Done():
+			logrus.Infof("Exiting after having written %s keys", strconv.Itoa(x))
+			doneCh <- x
+			return
+		default:
+			k := key + strconv.Itoa(x)
+			// write key
+			writeTableKey(ip, port, networkName, tableName, k)
+			// give time to send out key writes
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
 func writeDeleteUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan int) {
 	for x := 0; ; x++ {
 		select {
@@ -543,6 +560,87 @@ func doWriteDeleteWaitLeaveJoin(ips []string, args []string) {
 	cancel()
 }
 
+// write-wait-leave networkName tableName numParallelWriters writeTimeSec
+func doWriteWaitLeave(ips []string, args []string) {
+	networkName := args[0]
+	tableName := args[1]
+	parallelWriters, _ := strconv.Atoi(args[2])
+	writeTimeSec, _ := strconv.Atoi(args[3])
+
+	// Start parallel writers that will create and delete unique keys
+	doneCh := make(chan int, parallelWriters)
+	defer close(doneCh)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(writeTimeSec)*time.Second)
+	for i := 0; i < parallelWriters; i++ {
+		key := "key-" + strconv.Itoa(i) + "-"
+		logrus.Infof("Spawn worker: %d on IP:%s", i, ips[i])
+		go writeUniqueKeys(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
+	}
+
+	// Sync with all the writers
+	totalKeys := waitWriters(parallelWriters, true, doneCh)
+	cancel()
+	logrus.Infof("Written a total of %d keys on the cluster", totalKeys)
+
+	// The writers will leave the network
+	for i := 0; i < parallelWriters; i++ {
+		logrus.Infof("worker leaveNetwork: %d on IP:%s", i, ips[i])
+		go leaveNetwork(ips[i], servicePort, networkName, doneCh)
+	}
+	waitWriters(parallelWriters, false, doneCh)
+
+	// check table entries for 2 minutes
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	checkTable(ctx, ips, servicePort, networkName, tableName, 0)
+	cancel()
+}
+
+// write-wait-leave-join networkName tableName numParallelWriters writeTimeSec numParallelLeaver
+func doWriteWaitLeaveJoin(ips []string, args []string) {
+	networkName := args[0]
+	tableName := args[1]
+	parallelWriters, _ := strconv.Atoi(args[2])
+	writeTimeSec, _ := strconv.Atoi(args[3])
+	parallerlLeaver, _ := strconv.Atoi(args[4])
+
+	// Start parallel writers that will create and delete unique keys
+	doneCh := make(chan int, parallelWriters)
+	defer close(doneCh)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(writeTimeSec)*time.Second)
+	for i := 0; i < parallelWriters; i++ {
+		key := "key-" + strconv.Itoa(i) + "-"
+		logrus.Infof("Spawn worker: %d on IP:%s", i, ips[i])
+		go writeUniqueKeys(ctx, ips[i], servicePort, networkName, tableName, key, doneCh)
+	}
+
+	// Sync with all the writers
+	totalKeys := waitWriters(parallelWriters, true, doneCh)
+	cancel()
+	logrus.Infof("Written a total of %d keys on the cluster", totalKeys)
+
+	// The Leavers will leave the network
+	for i := 0; i < parallerlLeaver; i++ {
+		logrus.Infof("worker leaveNetwork: %d on IP:%s", i, ips[i])
+		go leaveNetwork(ips[i], servicePort, networkName, doneCh)
+	}
+	waitWriters(parallerlLeaver, false, doneCh)
+
+	// Give some time
+	time.Sleep(100 * time.Millisecond)
+
+	// The writers will join the network
+	for i := 0; i < parallerlLeaver; i++ {
+		logrus.Infof("worker joinNetwork: %d on IP:%s", i, ips[i])
+		go joinNetwork(ips[i], servicePort, networkName, doneCh)
+	}
+	waitWriters(parallerlLeaver, false, doneCh)
+
+	// check table entries for 2 minutes
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+	checkTable(ctx, ips, servicePort, networkName, tableName, 0)
+	cancel()
+}
+
 var cmdArgChec = map[string]int{
 	"debug":                    0,
 	"fail":                     0,
@@ -611,6 +709,12 @@ func Client(args []string) {
 	case "write-delete-wait-leave-join":
 		// write-delete-wait-leave-join networkName tableName numParallelWriters writeTimeSec
 		doWriteDeleteWaitLeaveJoin(ips, commandArgs)
+	case "write-wait-leave":
+		// write-wait-leave networkName tableName numParallelWriters writeTimeSec
+		doWriteWaitLeave(ips, commandArgs)
+	case "write-wait-leave-join":
+		// write-wait-leave networkName tableName numParallelWriters writeTimeSec
+		doWriteWaitLeaveJoin(ips, commandArgs)
 	default:
 		log.Fatalf("Command %s not recognized", command)
 	}
