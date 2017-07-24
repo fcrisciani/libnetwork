@@ -3,6 +3,7 @@ package networkdb
 //go:generate protoc -I.:../vendor/github.com/gogo/protobuf --gogo_out=import_path=github.com/docker/libnetwork/networkdb,Mgogoproto/gogo.proto=github.com/gogo/protobuf/gogoproto:. networkdb.proto
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/armon/go-radix"
 	"github.com/docker/go-events"
+	"github.com/docker/libnetwork/networkdb/api"
 	"github.com/docker/libnetwork/types"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/serf"
@@ -678,4 +680,39 @@ func (nDB *NetworkDB) updateLocalNetworkTime() {
 	for _, n := range nDB.networks[nDB.config.NodeName] {
 		n.ltime = ltime
 	}
+}
+
+func (nDB *NetworkDB) Initialize(context.Context, *api.Configuration) (*api.Result, error) {
+
+	return &api.Result{}, nil
+}
+
+func (nDB *NetworkDB) JoinCluster(ctx context.Context, in *api.JoinClusterReq) (*api.Result, error) {
+
+	return &api.Result{}, nil
+}
+
+func (nDB *NetworkDB) JoinGroup(context.Context, *api.GroupID) (*api.Result, error) {
+
+	return &api.Result{}, nil
+}
+func (nDB *NetworkDB) LeaveGroup(context.Context, *api.GroupID) (*api.Result, error) {
+
+	return &api.Result{}, nil
+}
+func (nDB *NetworkDB) CreateEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
+
+	return &api.Result{}, nil
+}
+func (nDB *NetworkDB) ReadEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
+
+	return &api.Result{}, nil
+}
+func (nDB *NetworkDB) UpdateEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
+
+	return &api.Result{}, nil
+}
+func (nDB *NetworkDB) DeleteEntryRpc(ctx context.Context, in *api.Entry) (*api.Result, error) {
+
+	return &api.Result{}, nil
 }

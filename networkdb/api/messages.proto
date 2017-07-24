@@ -1,3 +1,4 @@
+// compile: protoc --go_out=networkdb/api/ -I networkdb/api networkdb/api/messages.proto
 syntax = "proto3";
 
 package networkdb;
@@ -10,6 +11,7 @@ enum OperationResult {
 message Result {
   OperationResult status = 1;
   string error = 2;
+  bytes data = 3;
 }
 
 message Configuration {
@@ -26,4 +28,15 @@ message Configuration {
 
 message JoinClusterReq {
   repeated string Members = 1;
+}
+
+message GroupID {
+  string GroupName = 1;
+}
+
+message Entry {
+  GroupID Group = 1;
+  string TableName = 2;
+  string EntryName = 3;
+  bytes Value = 4;
 }
