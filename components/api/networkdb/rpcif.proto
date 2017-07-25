@@ -1,0 +1,90 @@
+// compile: protoc components/api/networkdb/rpcif.proto  --go_out=plugins=grpc:.
+
+syntax = "proto3";
+
+// import "messages.proto";
+import "google/protobuf/empty.proto";
+
+package api;
+
+service ConfigurationManagement {
+  // Component initialization
+  rpc Initialize (Configuration) returns (Result) {}
+}
+
+service ClusterManagement {
+  // // Cluster related operations
+  // rpc StateCluster () returns (State) {}
+  rpc JoinCluster (JoinClusterReq) returns (Result) {}
+  // rpc LeaveCluster () returns (Result) {}
+  rpc PeersCluster (google.protobuf.Empty) returns (PeerList) {}
+}
+
+// Interface exported by the server.
+service GroupManagement {
+  // // Group operations
+  rpc JoinGroup (GroupID) returns (Result) {}
+  rpc LeaveGroup (GroupID) returns (Result) {}
+  // rpc ListGroup () return (Result) {}
+  // rpc PeersGroup (Group) return (Result) {}
+  // rpc WatchGroup (Group) return (stream EntryValue) {}
+  }
+
+service EntryManagement {
+  // // Entry operations
+  rpc CreateEntryRpc (Entry) returns (Result) {}
+  rpc ReadEntryRpc (Entry) returns (Result) {}
+  rpc UpdateEntryRpc (Entry) returns (Result) {}
+  rpc DeleteEntryRpc (Entry) returns (Result) {}
+}
+
+// service Debug {
+//   rpc Ready (google.protobuf.Empty) returns (Result) {}
+// }
+
+enum OperationResult {
+  SUCCESS = 0;
+  FAIL = 1;
+}
+
+message Result {
+  OperationResult status = 1;
+  string error = 2;
+  bytes data = 3;
+}
+
+message Configuration {
+  // NodeName is the cluster wide unique name for this node.
+  string NodeName = 1;
+  // BindAddr is the IP on which networkdb listens.
+  string BindAddr = 2 ;
+  // BindPort is the local node's port to which we bind to for cluster communication.
+  int32 BindPort = 3;
+  // Keys to be added to the Keyring of the memberlist. Key at index
+	// 0 is the primary key
+  repeated bytes keys = 4;
+}
+
+message JoinClusterReq {
+  repeated string Members = 1;
+}
+
+message GroupID {
+  string GroupName = 1;
+}
+
+message Entry {
+  GroupID Group = 1;
+  string TableName = 2;
+  string EntryName = 3;
+  bytes Value = 4;
+}
+
+message PeerList {
+  repeated Peer peers = 1;
+}
+
+message Peer {
+  string name = 1;
+  string ip = 2;
+}

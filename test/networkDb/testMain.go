@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 	"os"
+	"os/exec"
 
 	"github.com/docker/libnetwork/test/networkDb/dbclient"
-	"github.com/docker/libnetwork/test/networkDb/dbserver"
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,7 +17,11 @@ func main() {
 
 	switch os.Args[1] {
 	case "server":
-		dbserver.Server(os.Args[2:])
+		cmd := exec.Command("/app/gossipdb")
+		err := cmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
 	case "client":
 		dbclient.Client(os.Args[2:])
 	}
