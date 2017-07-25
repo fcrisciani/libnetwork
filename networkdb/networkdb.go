@@ -13,7 +13,6 @@ import (
 
 	"github.com/armon/go-radix"
 	"github.com/docker/go-events"
-	"github.com/docker/libnetwork/networkdb/api"
 	"github.com/docker/libnetwork/types"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/serf"
