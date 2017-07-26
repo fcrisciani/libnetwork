@@ -3,11 +3,13 @@ package gossipdb
 import (
 	context "golang.org/x/net/context"
 
+	"github.com/Sirupsen/logrus"
 	api "github.com/docker/libnetwork/components/api/networkdb"
 	google_protobuf "github.com/golang/protobuf/ptypes/empty"
 )
 
 func (s *Server) JoinCluster(ctx context.Context, req *api.JoinClusterReq) (*api.Result, error) {
+	logrus.Infof("Received the JoinCluster with %v", req.GetMembers())
 	err := s.Database.Join(req.GetMembers())
 	return &api.Result{}, err
 }

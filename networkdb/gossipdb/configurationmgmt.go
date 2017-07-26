@@ -3,11 +3,13 @@ package gossipdb
 import (
 	context "golang.org/x/net/context"
 
+	"github.com/Sirupsen/logrus"
 	api "github.com/docker/libnetwork/components/api/networkdb"
 	"github.com/docker/libnetwork/networkdb"
 )
 
 func (s *Server) Initialize(ctx context.Context, config *api.Configuration) (*api.Result, error) {
+	logrus.Infof("Received the Initialize call")
 	netDBConf := networkdb.DefaultConfig()
 	netDBConf.NodeName = config.GetNodeName()
 	netDBConf.BindAddr = config.GetBindAddr()

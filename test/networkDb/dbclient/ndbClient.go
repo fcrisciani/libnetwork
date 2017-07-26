@@ -2,6 +2,7 @@ package dbclient
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -12,7 +13,10 @@ import (
 	"strings"
 	"time"
 
+	rpc "github.com/docker/libnetwork/components/api/networkdb"
+	google_protobuf "github.com/golang/protobuf/ptypes/empty"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 )
 
 var servicePort string
@@ -38,6 +42,24 @@ func httpGetFatalError(ip, port, path string) {
 	// }
 }
 
+func resultOKorFatal(ip string, err error, result *rpc.Result) {
+	if err != nil || result == nil || result.GetStatus() != rpc.OperationResult_SUCCESS {
+		log.Fatalf("[%s] error %s", ip, err)
+	}
+}
+
+func rpcClient(ip, port string) (*grpc.ClientConn, error) {
+	return grpc.Dial(fmt.Sprintf("%s:%s", ip, port), grpc.WithInsecure())
+}
+
+func rpcClientFatalError(ip, port string) *grpc.ClientConn {
+	conn, err := rpcClient(ip, port)
+	if err != nil {
+		log.Fatalf("[rpcClientFatalError] %s error %s", ip, err)
+	}
+	return conn
+}
+
 func httpGet(ip, port, path string) ([]byte, error) {
 	resp, err := http.Get("http://" + ip + ":" + port + path)
 	if err != nil {
@@ -49,8 +71,13 @@ func httpGet(ip, port, path string) ([]byte, error) {
 	return body, err
 }
 
-func joinCluster(ip, port string, members []string, doneCh chan resultTuple) {
-	httpGetFatalError(ip, port, "/join?members="+strings.Join(members, ","))
+func joinCluster(ctx context.Context, ip, port string, members []string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+
+	client := rpc.NewClusterManagementClient(conn)
+	result, err := client.JoinCluster(ctx, &rpc.JoinClusterReq{Members: members})
+	resultOKorFatal(ip, err, result)
 
 	if doneCh != nil {
 		doneCh <- resultTuple{id: ip, result: 0}
@@ -83,18 +110,17 @@ func deleteTableKey(ip, port, networkName, tableName, key string) {
 	httpGetFatalError(ip, port, deletePath+key)
 }
 
-func clusterPeersNumber(ip, port string, doneCh chan resultTuple) {
-	body, err := httpGet(ip, port, "/clusterpeers")
-
+func clusterPeersNumber(ctx context.Context, ip, port string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewClusterManagementClient(conn)
+	peers, err := client.PeersCluster(ctx, &google_protobuf.Empty{})
 	if err != nil {
 		logrus.Errorf("clusterPeers %s there was an error: %s\n", ip, err)
 		doneCh <- resultTuple{id: ip, result: -1}
 		return
 	}
-	peersRegexp := regexp.MustCompile(`Total peers: ([0-9]+)`)
-	peersNum, _ := strconv.Atoi(peersRegexp.FindStringSubmatch(string(body))[1])
-
-	doneCh <- resultTuple{id: ip, result: peersNum}
+	doneCh <- resultTuple{id: ip, result: len(peers.Peers)}
 }
 
 func networkPeersNumber(ip, port, networkName string, doneCh chan resultTuple) {
@@ -201,6 +227,35 @@ func writeDeleteLeaveJoin(ctx context.Context, ip, port, networkName, tableName,
 	}
 }
 
+func nodeInit(ctx context.Context, ip, port string, doneCh chan resultTuple) {
+	var result *rpc.Result
+
+	for {
+		conn, err := rpcClient(ip, port)
+		if err == nil {
+			client := rpc.NewConfigurationManagementClient(conn)
+			config := &rpc.Configuration{
+				NodeName: "Node-" + ip,
+				BindAddr: ip,
+			}
+			logrus.Infof("Sedning the init rpc to %s", ip)
+			result, err = client.Initialize(ctx, config)
+			logrus.Infof("Ended the init rpc to %s with error:%s", ip, err)
+		} else {
+			logrus.Warnf("rpc error: %s", err)
+		}
+		if err != nil || result.GetStatus() != rpc.OperationResult_SUCCESS {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		// success
+		conn.Close()
+		break
+	}
+	// notify the completion
+	doneCh <- resultTuple{id: ip, result: 0}
+}
+
 func ready(ip, port string, doneCh chan resultTuple) {
 	for {
 		body, err := httpGet(ip, port, "/ready")
@@ -280,6 +335,22 @@ func waitWriters(parallelWriters int, mustWrite bool, doneCh chan resultTuple) m
 	return resultTable
 }
 
+// init
+func doInitialize(ips []string) {
+	doneCh := make(chan resultTuple, len(ips))
+	// check all the nodes
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	for _, ip := range ips {
+		go nodeInit(ctx, ip, servicePort, doneCh)
+	}
+	// wait for the readiness of all nodes
+	for i := len(ips); i > 0; i-- {
+		<-doneCh
+	}
+	cancel()
+	close(doneCh)
+}
+
 // ready
 func doReady(ips []string) {
 	doneCh := make(chan resultTuple, len(ips))
@@ -298,15 +369,17 @@ func doReady(ips []string) {
 func doJoin(ips []string) {
 	doneCh := make(chan resultTuple, len(ips))
 	// check all the nodes
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	for i, ip := range ips {
 		members := append([]string(nil), ips[:i]...)
 		members = append(members, ips[i+1:]...)
-		go joinCluster(ip, servicePort, members, doneCh)
+		go joinCluster(ctx, ip, servicePort, members, doneCh)
 	}
 	// wait for the readiness of all nodes
 	for i := len(ips); i > 0; i-- {
 		<-doneCh
 	}
+	cancel()
 	close(doneCh)
 }
 
@@ -315,8 +388,9 @@ func doClusterPeers(ips []string, args []string) {
 	doneCh := make(chan resultTuple, len(ips))
 	expectedPeers, _ := strconv.Atoi(args[0])
 	// check all the nodes
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	for _, ip := range ips {
-		go clusterPeersNumber(ip, servicePort, doneCh)
+		go clusterPeersNumber(ctx, ip, servicePort, doneCh)
 	}
 	// wait for the readiness of all nodes
 	for i := len(ips); i > 0; i-- {
@@ -325,6 +399,7 @@ func doClusterPeers(ips []string, args []string) {
 			log.Fatalf("Expected peers from %s missmatch %d != %d", node.id, expectedPeers, node.result)
 		}
 	}
+	cancel()
 	close(doneCh)
 }
 
@@ -613,6 +688,7 @@ func doWriteWaitLeaveJoin(ips []string, args []string) {
 var cmdArgChec = map[string]int{
 	"debug":                    0,
 	"fail":                     0,
+	"initialize":               0,
 	"ready":                    2,
 	"join":                     2,
 	"leave":                    2,
@@ -649,6 +725,8 @@ func Client(args []string) {
 	commandArgs := args[3:]
 	logrus.Infof("Executing %s with args:%v", command, commandArgs)
 	switch command {
+	case "initialize":
+		doInitialize(ips)
 	case "ready":
 		doReady(ips)
 	case "join":

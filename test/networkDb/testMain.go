@@ -18,6 +18,8 @@ func main() {
 	switch os.Args[1] {
 	case "server":
 		cmd := exec.Command("/app/gossipdb")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
 		err := cmd.Run()
 		if err != nil {
 			log.Fatal(err)

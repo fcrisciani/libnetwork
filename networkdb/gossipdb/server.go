@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/Sirupsen/logrus"
 	rpc "github.com/docker/libnetwork/components/api/networkdb"
 	"github.com/docker/libnetwork/networkdb"
 )
@@ -27,6 +28,6 @@ func (s *Server) StartServer() {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-
+	logrus.Infof("Starting the RPC server")
 	s.Srv.Serve(lis)
 }
