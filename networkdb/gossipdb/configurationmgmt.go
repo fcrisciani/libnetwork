@@ -21,6 +21,7 @@ func (s *Server) Initialize(ctx context.Context, config *api.Configuration) (*ap
 		api.RegisterClusterManagementServer(s.Srv, s)
 		api.RegisterGroupManagementServer(s.Srv, s)
 		api.RegisterEntryManagementServer(s.Srv, s)
+		api.RegisterDiagnoseManagementServer(s.Srv, s)
 	}
 
 	return &api.Result{}, err

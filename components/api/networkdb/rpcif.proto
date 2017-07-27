@@ -26,7 +26,7 @@ service GroupManagement {
   rpc JoinGroup (GroupID) returns (Result) {}
   rpc LeaveGroup (GroupID) returns (Result) {}
   // rpc ListGroup () return (Result) {}
-  // rpc PeersGroup (Group) return (Result) {}
+  rpc PeersGroup (GroupID) returns (PeerList) {}
   // rpc WatchGroup (Group) return (stream EntryValue) {}
   }
 
@@ -38,9 +38,9 @@ service EntryManagement {
   rpc DeleteEntryRpc (Entry) returns (Result) {}
 }
 
-// service Debug {
-//   rpc Ready (google.protobuf.Empty) returns (Result) {}
-// }
+service DiagnoseManagement {
+  rpc Ready (google.protobuf.Empty) returns (Result) {}
+}
 
 enum OperationResult {
   SUCCESS = 0;

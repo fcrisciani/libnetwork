@@ -21,7 +21,10 @@ import (
 
 var servicePort string
 
-const totalWrittenKeys string = "totalKeys"
+const (
+	totalWrittenKeys string        = "totalKeys"
+	operationTimeout time.Duration = 30 * time.Second
+)
 
 type resultTuple struct {
 	id     string
@@ -71,12 +74,14 @@ func httpGet(ip, port, path string) ([]byte, error) {
 	return body, err
 }
 
-func joinCluster(ctx context.Context, ip, port string, members []string, doneCh chan resultTuple) {
+func joinCluster(ip, port string, members []string, doneCh chan resultTuple) {
 	conn := rpcClientFatalError(ip, port)
 	defer conn.Close()
 
 	client := rpc.NewClusterManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	result, err := client.JoinCluster(ctx, &rpc.JoinClusterReq{Members: members})
+	cancel()
 	resultOKorFatal(ip, err, result)
 
 	if doneCh != nil {
@@ -84,16 +89,28 @@ func joinCluster(ctx context.Context, ip, port string, members []string, doneCh 
 	}
 }
 
-func joinNetwork(ip, port, network string, doneCh chan resultTuple) {
-	httpGetFatalError(ip, port, "/joinnetwork?nid="+network)
+func joinNetwork(ip, port, networkName string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewGroupManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	result, err := client.JoinGroup(ctx, &rpc.GroupID{GroupName: networkName})
+	cancel()
+	resultOKorFatal(ip, err, result)
 
 	if doneCh != nil {
 		doneCh <- resultTuple{id: ip, result: 0}
 	}
 }
 
-func leaveNetwork(ip, port, network string, doneCh chan resultTuple) {
-	httpGetFatalError(ip, port, "/leavenetwork?nid="+network)
+func leaveNetwork(ip, port, networkName string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewGroupManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	result, err := client.LeaveGroup(ctx, &rpc.GroupID{GroupName: networkName})
+	cancel()
+	resultOKorFatal(ip, err, result)
 
 	if doneCh != nil {
 		doneCh <- resultTuple{id: ip, result: 0}
@@ -110,11 +127,13 @@ func deleteTableKey(ip, port, networkName, tableName, key string) {
 	httpGetFatalError(ip, port, deletePath+key)
 }
 
-func clusterPeersNumber(ctx context.Context, ip, port string, doneCh chan resultTuple) {
+func clusterPeersNumber(ip, port string, doneCh chan resultTuple) {
 	conn := rpcClientFatalError(ip, port)
 	defer conn.Close()
 	client := rpc.NewClusterManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	peers, err := client.PeersCluster(ctx, &google_protobuf.Empty{})
+	cancel()
 	if err != nil {
 		logrus.Errorf("clusterPeers %s there was an error: %s\n", ip, err)
 		doneCh <- resultTuple{id: ip, result: -1}
@@ -124,17 +143,19 @@ func clusterPeersNumber(ctx context.Context, ip, port string, doneCh chan result
 }
 
 func networkPeersNumber(ip, port, networkName string, doneCh chan resultTuple) {
-	body, err := httpGet(ip, port, "/networkpeers?nid="+networkName)
-
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewGroupManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	peers, err := client.PeersGroup(ctx, &rpc.GroupID{GroupName: networkName})
+	cancel()
 	if err != nil {
 		logrus.Errorf("networkPeersNumber %s there was an error: %s\n", ip, err)
 		doneCh <- resultTuple{id: ip, result: -1}
 		return
 	}
-	peersRegexp := regexp.MustCompile(`Total peers: ([0-9]+)`)
-	peersNum, _ := strconv.Atoi(peersRegexp.FindStringSubmatch(string(body))[1])
 
-	doneCh <- resultTuple{id: ip, result: peersNum}
+	doneCh <- resultTuple{id: ip, result: len(peers.Peers)}
 }
 
 func dbTableEntriesNumber(ip, port, networkName, tableName string, doneCh chan resultTuple) {
@@ -258,13 +279,20 @@ func nodeInit(ctx context.Context, ip, port string, doneCh chan resultTuple) {
 
 func ready(ip, port string, doneCh chan resultTuple) {
 	for {
-		body, err := httpGet(ip, port, "/ready")
-		if err != nil || !strings.Contains(string(body), "OK") {
-			time.Sleep(500 * time.Millisecond)
-			continue
+		conn, err := rpcClient(ip, port)
+		if err == nil {
+			client := rpc.NewDiagnoseManagementClient(conn)
+			ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+			result, err := client.Ready(ctx, &google_protobuf.Empty{})
+			cancel()
+			if err != nil || result.Status != rpc.OperationResult_SUCCESS {
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			// success
+			break
 		}
-		// success
-		break
+		time.Sleep(500 * time.Millisecond)
 	}
 	// notify the completion
 	doneCh <- resultTuple{id: ip, result: 0}
@@ -339,7 +367,7 @@ func waitWriters(parallelWriters int, mustWrite bool, doneCh chan resultTuple) m
 func doInitialize(ips []string) {
 	doneCh := make(chan resultTuple, len(ips))
 	// check all the nodes
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	for _, ip := range ips {
 		go nodeInit(ctx, ip, servicePort, doneCh)
 	}
@@ -369,17 +397,15 @@ func doReady(ips []string) {
 func doJoin(ips []string) {
 	doneCh := make(chan resultTuple, len(ips))
 	// check all the nodes
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	for i, ip := range ips {
 		members := append([]string(nil), ips[:i]...)
 		members = append(members, ips[i+1:]...)
-		go joinCluster(ctx, ip, servicePort, members, doneCh)
+		go joinCluster(ip, servicePort, members, doneCh)
 	}
 	// wait for the readiness of all nodes
 	for i := len(ips); i > 0; i-- {
 		<-doneCh
 	}
-	cancel()
 	close(doneCh)
 }
 
@@ -388,9 +414,8 @@ func doClusterPeers(ips []string, args []string) {
 	doneCh := make(chan resultTuple, len(ips))
 	expectedPeers, _ := strconv.Atoi(args[0])
 	// check all the nodes
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	for _, ip := range ips {
-		go clusterPeersNumber(ctx, ip, servicePort, doneCh)
+		go clusterPeersNumber(ip, servicePort, doneCh)
 	}
 	// wait for the readiness of all nodes
 	for i := len(ips); i > 0; i-- {
@@ -399,7 +424,6 @@ func doClusterPeers(ips []string, args []string) {
 			log.Fatalf("Expected peers from %s missmatch %d != %d", node.id, expectedPeers, node.result)
 		}
 	}
-	cancel()
 	close(doneCh)
 }
 
@@ -489,6 +513,7 @@ func doWriteDeleteUniqueKeys(ips []string, args []string) {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 	checkTable(ctx, ips, servicePort, networkName, tableName, 0, dbTableEntriesNumber)
 	cancel()
+
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	checkTable(ctx, ips, servicePort, networkName, tableName, 0, clientTableEntriesNumber)
 	cancel()

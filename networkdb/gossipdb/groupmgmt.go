@@ -17,3 +17,13 @@ func (s *Server) LeaveGroup(ctx context.Context, group *api.GroupID) (*api.Resul
 
 	return &api.Result{}, err
 }
+
+func (s *Server) PeersGroup(ctx context.Context, group *api.GroupID) (*api.PeerList, error) {
+	peers := s.Database.Peers(group.GetGroupName())
+
+	res := &api.PeerList{}
+	for _, peer := range peers {
+		res.Peers = append(res.Peers, &api.Peer{Name: peer.Name, Ip: peer.IP})
+	}
+	return res, nil
+}
