@@ -3,14 +3,10 @@ package dbclient
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
-	"net/http"
 	"os"
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	rpc "github.com/docker/libnetwork/components/api/networkdb"
@@ -31,20 +27,6 @@ type resultTuple struct {
 	result int
 }
 
-func httpGetFatalError(ip, port, path string) {
-	// for {
-	body, err := httpGet(ip, port, path)
-	if err != nil || !strings.Contains(string(body), "OK") {
-		// if strings.Contains(err.Error(), "EOF") {
-		// 	logrus.Warnf("Got EOF path:%s err:%s", path, err)
-		// 	continue
-		// }
-		log.Fatalf("[%s] error %s %s", path, err, body)
-	}
-	// break
-	// }
-}
-
 func resultOKorFatal(ip string, err error, result *rpc.Result) {
 	if err != nil || result == nil || result.GetStatus() != rpc.OperationResult_SUCCESS {
 		log.Fatalf("[%s] error %s", ip, err)
@@ -61,17 +43,6 @@ func rpcClientFatalError(ip, port string) *grpc.ClientConn {
 		log.Fatalf("[rpcClientFatalError] %s error %s", ip, err)
 	}
 	return conn
-}
-
-func httpGet(ip, port, path string) ([]byte, error) {
-	resp, err := http.Get("http://" + ip + ":" + port + path)
-	if err != nil {
-		logrus.Errorf("httpGet error:%s", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	return body, err
 }
 
 func joinCluster(ip, port string, members []string, doneCh chan resultTuple) {
@@ -118,13 +89,31 @@ func leaveNetwork(ip, port, networkName string, doneCh chan resultTuple) {
 }
 
 func writeTableKey(ip, port, networkName, tableName, key string) {
-	createPath := "/createentry?nid=" + networkName + "&tname=" + tableName + "&value=v&key="
-	httpGetFatalError(ip, port, createPath+key)
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewEntryManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	result, err := client.CreateEntryRpc(ctx,
+		&rpc.EntryIn{
+			Table: &rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName},
+			Entry: &rpc.Entry{Key: key, Value: []byte("v")},
+		})
+	cancel()
+	resultOKorFatal(ip, err, result)
 }
 
 func deleteTableKey(ip, port, networkName, tableName, key string) {
-	deletePath := "/deleteentry?nid=" + networkName + "&tname=" + tableName + "&key="
-	httpGetFatalError(ip, port, deletePath+key)
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewEntryManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	result, err := client.DeleteEntryRpc(ctx,
+		&rpc.EntryIn{
+			Table: &rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName},
+			Entry: &rpc.Entry{Key: key},
+		})
+	cancel()
+	resultOKorFatal(ip, err, result)
 }
 
 func clusterPeersNumber(ip, port string, doneCh chan resultTuple) {
@@ -159,36 +148,41 @@ func networkPeersNumber(ip, port, networkName string, doneCh chan resultTuple) {
 }
 
 func dbTableEntriesNumber(ip, port, networkName, tableName string, doneCh chan resultTuple) {
-	body, err := httpGet(ip, port, "/gettable?nid="+networkName+"&tname="+tableName)
-
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewEntryManagementClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	entryList, err := client.ReadTable(ctx,
+		&rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName})
+	cancel()
 	if err != nil {
-		logrus.Errorf("tableEntriesNumber %s there was an error: %s\n", ip, err)
+		logrus.Errorf("dbTableEntriesNumber %s there was an error: %s\n", ip, err)
 		doneCh <- resultTuple{id: ip, result: -1}
 		return
 	}
-	elementsRegexp := regexp.MustCompile(`total elements: ([0-9]+)`)
-	entriesNum, _ := strconv.Atoi(elementsRegexp.FindStringSubmatch(string(body))[1])
-	doneCh <- resultTuple{id: ip, result: entriesNum}
+
+	doneCh <- resultTuple{id: ip, result: len(entryList.List)}
 }
 
 func clientWatchTable(ip, port, networkName, tableName string, doneCh chan resultTuple) {
-	httpGetFatalError(ip, port, "/watchtable?nid="+networkName+"&tname="+tableName)
+	// httpGetFatalError(ip, port, "/watchtable?nid="+networkName+"&tname="+tableName)
 	if doneCh != nil {
 		doneCh <- resultTuple{id: ip, result: 0}
 	}
 }
 
 func clientTableEntriesNumber(ip, port, networkName, tableName string, doneCh chan resultTuple) {
-	body, err := httpGet(ip, port, "/watchedtableentries?nid="+networkName+"&tname="+tableName)
-
-	if err != nil {
-		logrus.Errorf("clientTableEntriesNumber %s there was an error: %s\n", ip, err)
-		doneCh <- resultTuple{id: ip, result: -1}
-		return
-	}
-	elementsRegexp := regexp.MustCompile(`total elements: ([0-9]+)`)
-	entriesNum, _ := strconv.Atoi(elementsRegexp.FindStringSubmatch(string(body))[1])
-	doneCh <- resultTuple{id: ip, result: entriesNum}
+	// body, err := httpGet(ip, port, "/watchedtableentries?nid="+networkName+"&tname="+tableName)
+	//
+	// if err != nil {
+	// 	logrus.Errorf("clientTableEntriesNumber %s there was an error: %s\n", ip, err)
+	// 	doneCh <- resultTuple{id: ip, result: -1}
+	// 	return
+	// }
+	// elementsRegexp := regexp.MustCompile(`total elements: ([0-9]+)`)
+	// entriesNum, _ := strconv.Atoi(elementsRegexp.FindStringSubmatch(string(body))[1])
+	// doneCh <- resultTuple{id: ip, result: entriesNum}
+	doneCh <- resultTuple{id: ip, result: 0}
 }
 
 func writeUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan resultTuple) {
