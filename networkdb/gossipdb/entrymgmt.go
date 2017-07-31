@@ -4,6 +4,7 @@ import (
 	context "golang.org/x/net/context"
 
 	api "github.com/docker/libnetwork/components/api/networkdb"
+	"github.com/docker/libnetwork/networkdb"
 )
 
 func (s *Server) CreateEntryRpc(ctx context.Context, entry *api.EntryIn) (*api.Result, error) {
@@ -34,4 +35,31 @@ func (s *Server) ReadTable(ctx context.Context, table *api.TableID) (*api.EntryL
 		list = append(list, &api.Entry{Key: k, Value: v.([]byte)})
 	}
 	return &api.EntryList{Table: table, List: list}, nil
+}
+
+func (s *Server) WatchTable(table *api.TableID, stream api.EntryManagement_WatchTableServer) error {
+	// ch, cancel := s.Database.Watch(table.GetTableName(), table.GetGroup().GetGroupName(), "")
+	ch, _ := s.Database.Watch(table.GetTableName(), table.GetGroup().GetGroupName(), "")
+	var tableEvent *api.TableEvent
+	for {
+		select {
+		case ev := <-ch.C:
+			tableEvent = &api.TableEvent{Table: table}
+			switch event := ev.(type) {
+			case networkdb.CreateEvent:
+				tableEvent.Operation = api.TableOperation_CREATE
+				tableEvent.Entry = &api.Entry{Key: event.Key, Value: event.Value}
+			case networkdb.DeleteEvent:
+				tableEvent.Operation = api.TableOperation_DELETE
+				tableEvent.Entry = &api.Entry{Key: event.Key, Value: event.Value}
+			case networkdb.UpdateEvent:
+				tableEvent.Operation = api.TableOperation_UPDATE
+				tableEvent.Entry = &api.Entry{Key: event.Key, Value: event.Value}
+			}
+			stream.Send(tableEvent)
+		case <-ch.Done():
+			// Close the stream
+			return nil
+		}
+	}
 }

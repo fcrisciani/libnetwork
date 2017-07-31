@@ -3,6 +3,7 @@ package dbclient
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -164,25 +165,60 @@ func dbTableEntriesNumber(ip, port, networkName, tableName string, doneCh chan r
 	doneCh <- resultTuple{id: ip, result: len(entryList.List)}
 }
 
-func clientWatchTable(ip, port, networkName, tableName string, doneCh chan resultTuple) {
-	// httpGetFatalError(ip, port, "/watchtable?nid="+networkName+"&tname="+tableName)
+func clientWatchTable(ctx context.Context, ip, port, networkName, tableName string, clientTable map[string]string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
+	client := rpc.NewEntryManagementClient(conn)
+	stream, err := client.WatchTable(ctx, &rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName})
+	if err != nil {
+		// Connection failed
+		if doneCh != nil {
+			doneCh <- resultTuple{id: ip, result: -1}
+		}
+		return
+	}
+	// connection succeeded
+	if doneCh != nil {
+		doneCh <- resultTuple{id: ip, result: 0}
+	}
+	// Receive events
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		switch event.Operation {
+		case rpc.TableOperation_CREATE:
+			clientTable[event.Entry.Key] = string(event.Entry.Value)
+		case rpc.TableOperation_DELETE:
+			delete(clientTable, event.Entry.Key)
+		default:
+			logrus.Errorf("Unknown event recevied %v", event)
+		}
+	}
+
 	if doneCh != nil {
 		doneCh <- resultTuple{id: ip, result: 0}
 	}
 }
 
-func clientTableEntriesNumber(ip, port, networkName, tableName string, doneCh chan resultTuple) {
-	// body, err := httpGet(ip, port, "/watchedtableentries?nid="+networkName+"&tname="+tableName)
-	//
-	// if err != nil {
-	// 	logrus.Errorf("clientTableEntriesNumber %s there was an error: %s\n", ip, err)
-	// 	doneCh <- resultTuple{id: ip, result: -1}
-	// 	return
-	// }
-	// elementsRegexp := regexp.MustCompile(`total elements: ([0-9]+)`)
-	// entriesNum, _ := strconv.Atoi(elementsRegexp.FindStringSubmatch(string(body))[1])
-	// doneCh <- resultTuple{id: ip, result: entriesNum}
-	doneCh <- resultTuple{id: ip, result: 0}
+func clientTableEntries(ips []string, clientTables map[string]map[string]string, expected int) bool {
+	var success int
+	for i := 0; i < 30; i++ {
+		success = 0
+		logrus.Infof("Check client table entries expected %d", expected)
+		for _, ip := range ips {
+			logrus.Infof("Node %s has %d entries", ip, len(clientTables[ip]))
+			if len(clientTables[ip]) == expected {
+				success++
+			}
+		}
+		if success == len(ips) {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return success == len(ips)
 }
 
 func writeUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan resultTuple) {
@@ -482,11 +518,14 @@ func doWriteDeleteUniqueKeys(ips []string, args []string) {
 	tableName := args[1]
 	parallelWriters, _ := strconv.Atoi(args[2])
 	writeTimeSec, _ := strconv.Atoi(args[3])
+	clientTables := make(map[string]map[string]string)
 
 	doneCh := make(chan resultTuple, parallelWriters)
+	clientCtx, clientCancel := context.WithCancel(context.Background())
 	// Enable watch of tables from clients
 	for i := 0; i < parallelWriters; i++ {
-		go clientWatchTable(ips[i], servicePort, networkName, tableName, doneCh)
+		clientTables[ips[i]] = make(map[string]string)
+		go clientWatchTable(clientCtx, ips[i], servicePort, networkName, tableName, clientTables[ips[i]], doneCh)
 	}
 	waitWriters(parallelWriters, false, doneCh)
 
@@ -508,9 +547,10 @@ func doWriteDeleteUniqueKeys(ips []string, args []string) {
 	checkTable(ctx, ips, servicePort, networkName, tableName, 0, dbTableEntriesNumber)
 	cancel()
 
-	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-	checkTable(ctx, ips, servicePort, networkName, tableName, 0, clientTableEntriesNumber)
-	cancel()
+	if !clientTableEntries(ips, clientTables, 0) {
+		log.Fatalf("Expected 0 clientTableEntries")
+	}
+	clientCancel()
 }
 
 // write-unique-keys networkName tableName numParallelWriters writeTimeSec
@@ -519,11 +559,14 @@ func doWriteUniqueKeys(ips []string, args []string) {
 	tableName := args[1]
 	parallelWriters, _ := strconv.Atoi(args[2])
 	writeTimeSec, _ := strconv.Atoi(args[3])
+	clientTables := make(map[string]map[string]string)
 
 	doneCh := make(chan resultTuple, parallelWriters)
+	clientCtx, clientCancel := context.WithCancel(context.Background())
 	// Enable watch of tables from clients
 	for i := 0; i < parallelWriters; i++ {
-		go clientWatchTable(ips[i], servicePort, networkName, tableName, doneCh)
+		clientTables[ips[i]] = make(map[string]string)
+		go clientWatchTable(clientCtx, ips[i], servicePort, networkName, tableName, clientTables[ips[i]], doneCh)
 	}
 	waitWriters(parallelWriters, false, doneCh)
 
@@ -545,6 +588,11 @@ func doWriteUniqueKeys(ips []string, args []string) {
 	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 	checkTable(ctx, ips, servicePort, networkName, tableName, keyMap[totalWrittenKeys], dbTableEntriesNumber)
 	cancel()
+
+	if !clientTableEntries(ips, clientTables, keyMap[totalWrittenKeys]) {
+		log.Fatalf("Expected %d clientTableEntries", keyMap[totalWrittenKeys])
+	}
+	clientCancel()
 }
 
 // write-delete-leave-join networkName tableName numParallelWriters writeTimeSec
@@ -767,7 +815,7 @@ func Client(args []string) {
 		doNetworkPeers(ips, commandArgs)
 
 	case "write-unique-keys":
-		// write-delete-unique-keys networkName tableName numParallelWriters writeTimeSec
+		// write-unique-keys networkName tableName numParallelWriters writeTimeSec
 		doWriteUniqueKeys(ips, commandArgs)
 	case "write-delete-unique-keys":
 		// write-delete-unique-keys networkName tableName numParallelWriters writeTimeSec

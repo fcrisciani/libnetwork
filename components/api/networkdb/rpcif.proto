@@ -27,7 +27,6 @@ service GroupManagement {
   rpc LeaveGroup (GroupID) returns (Result) {}
   // rpc ListGroup () return (Result) {}
   rpc PeersGroup (GroupID) returns (PeerList) {}
-  // rpc WatchGroup (Group) return (stream EntryValue) {}
   }
 
 service EntryManagement {
@@ -39,6 +38,7 @@ service EntryManagement {
 
   // Table operations
   rpc ReadTable(TableID) returns (EntryList) {}
+  rpc WatchTable (TableID) returns (stream TableEvent) {}
 }
 
 service DiagnoseManagement {
@@ -103,4 +103,16 @@ message PeerList {
 message Peer {
   string name = 1;
   string ip = 2;
+}
+
+enum TableOperation {
+  CREATE = 0;
+  UPDATE = 1;
+  DELETE = 2;
+}
+
+message TableEvent {
+  TableOperation operation = 1;
+  TableID table = 2;
+  Entry entry = 3;
 }
