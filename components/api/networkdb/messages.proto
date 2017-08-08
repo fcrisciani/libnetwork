@@ -15,28 +15,62 @@ message Result {
 }
 
 message Configuration {
-  // NodeName is the cluster wide unique name for this node.
-  string NodeName = 1;
-  // BindAddr is the IP on which networkdb listens.
-  string BindAddr = 2 ;
-  // BindPort is the local node's port to which we bind to for cluster communication.
-  int32 BindPort = 3;
-  // Keys to be added to the Keyring of the memberlist. Key at index
+  // nodeName is the cluster wide unique name for this node.
+  string nodeName = 1;
+  // bindAddr is the IP on which networkdb listens.
+  string bindAddr = 2 ;
+  // bindPort is the local node's port to which we bind to for cluster communication.
+  int32 bindPort = 3;
+  // keys to be added to the Keyring of the memberlist. Key at index
 	// 0 is the primary key
   repeated bytes keys = 4;
 }
 
 message JoinClusterReq {
-  repeated string Members = 1;
+  repeated string members = 1;
 }
 
 message GroupID {
-  string GroupName = 1;
+  string groupName = 1;
+}
+
+message TableID {
+  GroupID group = 1;
+  string tableName = 2;
+}
+
+message EntryIn {
+  TableID table = 1;
+  Entry entry = 2;
 }
 
 message Entry {
-  GroupID Group = 1;
-  string TableName = 2;
-  string EntryName = 3;
-  bytes Value = 4;
+  string key = 1;
+  bytes value = 2;
+}
+
+message EntryList {
+  TableID table = 1;
+  repeated Entry list = 2;
+}
+
+message PeerList {
+  repeated Peer peers = 1;
+}
+
+message Peer {
+  string name = 1;
+  string ip = 2;
+}
+
+enum TableOperation {
+  CREATE = 0;
+  UPDATE = 1;
+  DELETE = 2;
+}
+
+message TableEvent {
+  TableOperation operation = 1;
+  TableID table = 2;
+  Entry entry = 3;
 }

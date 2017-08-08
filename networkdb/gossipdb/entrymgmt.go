@@ -56,7 +56,9 @@ func (s *Server) WatchTable(table *api.TableID, stream api.EntryManagement_Watch
 				tableEvent.Operation = api.TableOperation_UPDATE
 				tableEvent.Entry = &api.Entry{Key: event.Key, Value: event.Value}
 			}
-			stream.Send(tableEvent)
+			if err := stream.Send(tableEvent); err != nil {
+				return err
+			}
 		case <-ch.Done():
 			// Close the stream
 			return nil

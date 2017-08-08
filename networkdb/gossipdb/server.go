@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/Sirupsen/logrus"
-	rpc "github.com/docker/libnetwork/components/api/networkdb"
+	api "github.com/docker/libnetwork/components/api/networkdb"
 	"github.com/docker/libnetwork/networkdb"
 )
 
@@ -20,7 +20,7 @@ type Server struct {
 func (s *Server) Init() {
 	s.Srv = grpc.NewServer()
 	// Register the configuration manager service
-	rpc.RegisterConfigurationManagementServer(s.Srv, s)
+	api.RegisterConfigurationManagementServer(s.Srv, s)
 }
 
 func (s *Server) StartServer() {

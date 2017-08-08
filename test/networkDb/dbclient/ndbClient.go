@@ -314,11 +314,43 @@ func ready(ip, port string, doneCh chan resultTuple) {
 			client := rpc.NewDiagnoseManagementClient(conn)
 			ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 			result, err := client.Ready(ctx, &google_protobuf.Empty{})
+			logrus.Errorf("The err is: %s and the result:%v", err, result)
 			cancel()
 			if err != nil || result.Status != rpc.OperationResult_SUCCESS {
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
+			// success
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	// notify the completion
+	doneCh <- resultTuple{id: ip, result: 0}
+}
+
+func testStream(ip, port string, doneCh chan resultTuple) {
+	for {
+		conn, err := rpcClient(ip, port)
+		if err == nil {
+			client := rpc.NewDiagnoseManagementClient(conn)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			stream, err := client.WatchTest(ctx, &google_protobuf.Empty{})
+			logrus.Errorf("The err is: %s and the result:%v", err, stream)
+			i := 0
+			for {
+				res, err := stream.Recv()
+				i++
+				if err != nil {
+					logrus.Errorf("The err is: %s", err)
+					break
+				}
+				logrus.Errorf("%d res is:%v", i, res)
+				if i == 3 {
+					stream.CloseSend()
+				}
+			}
+			cancel()
 			// success
 			break
 		}
@@ -415,6 +447,19 @@ func doReady(ips []string) {
 	// check all the nodes
 	for _, ip := range ips {
 		go ready(ip, servicePort, doneCh)
+	}
+	// wait for the readiness of all nodes
+	for i := len(ips); i > 0; i-- {
+		<-doneCh
+	}
+	close(doneCh)
+}
+
+func doTestStream(ips []string) {
+	doneCh := make(chan resultTuple, len(ips))
+	// check all the nodes
+	for _, ip := range ips {
+		go testStream(ip, servicePort, doneCh)
 	}
 	// wait for the readiness of all nodes
 	for i := len(ips); i > 0; i-- {
@@ -796,6 +841,8 @@ func Client(args []string) {
 		doInitialize(ips)
 	case "ready":
 		doReady(ips)
+	case "test-stream":
+		doTestStream(ips)
 	case "join":
 		doJoin(ips)
 	case "leave":
