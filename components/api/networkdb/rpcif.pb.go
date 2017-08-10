@@ -95,10 +95,10 @@ var _ConfigurationManagement_serviceDesc = grpc.ServiceDesc{
 // Client API for ClusterManagement service
 
 type ClusterManagementClient interface {
-	// // Cluster related operations
-	// rpc StateCluster () returns (State) {}
-	JoinCluster(ctx context.Context, in *JoinClusterReq, opts ...grpc.CallOption) (*Result, error)
-	// rpc LeaveCluster () returns (Result) {}
+	// Cluster related operations
+	StateCluster(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (*ClusterState, error)
+	JoinCluster(ctx context.Context, in *PeerList, opts ...grpc.CallOption) (*Result, error)
+	LeaveCluster(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (*Result, error)
 	PeersCluster(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (*PeerList, error)
 }
 
@@ -110,9 +110,27 @@ func NewClusterManagementClient(cc *grpc.ClientConn) ClusterManagementClient {
 	return &clusterManagementClient{cc}
 }
 
-func (c *clusterManagementClient) JoinCluster(ctx context.Context, in *JoinClusterReq, opts ...grpc.CallOption) (*Result, error) {
+func (c *clusterManagementClient) StateCluster(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (*ClusterState, error) {
+	out := new(ClusterState)
+	err := grpc.Invoke(ctx, "/networkdb.ClusterManagement/StateCluster", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterManagementClient) JoinCluster(ctx context.Context, in *PeerList, opts ...grpc.CallOption) (*Result, error) {
 	out := new(Result)
 	err := grpc.Invoke(ctx, "/networkdb.ClusterManagement/JoinCluster", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterManagementClient) LeaveCluster(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (*Result, error) {
+	out := new(Result)
+	err := grpc.Invoke(ctx, "/networkdb.ClusterManagement/LeaveCluster", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -131,10 +149,10 @@ func (c *clusterManagementClient) PeersCluster(ctx context.Context, in *google_p
 // Server API for ClusterManagement service
 
 type ClusterManagementServer interface {
-	// // Cluster related operations
-	// rpc StateCluster () returns (State) {}
-	JoinCluster(context.Context, *JoinClusterReq) (*Result, error)
-	// rpc LeaveCluster () returns (Result) {}
+	// Cluster related operations
+	StateCluster(context.Context, *google_protobuf.Empty) (*ClusterState, error)
+	JoinCluster(context.Context, *PeerList) (*Result, error)
+	LeaveCluster(context.Context, *google_protobuf.Empty) (*Result, error)
 	PeersCluster(context.Context, *google_protobuf.Empty) (*PeerList, error)
 }
 
@@ -142,8 +160,26 @@ func RegisterClusterManagementServer(s *grpc.Server, srv ClusterManagementServer
 	s.RegisterService(&_ClusterManagement_serviceDesc, srv)
 }
 
+func _ClusterManagement_StateCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(google_protobuf.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterManagementServer).StateCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/networkdb.ClusterManagement/StateCluster",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterManagementServer).StateCluster(ctx, req.(*google_protobuf.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ClusterManagement_JoinCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(JoinClusterReq)
+	in := new(PeerList)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -155,7 +191,25 @@ func _ClusterManagement_JoinCluster_Handler(srv interface{}, ctx context.Context
 		FullMethod: "/networkdb.ClusterManagement/JoinCluster",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ClusterManagementServer).JoinCluster(ctx, req.(*JoinClusterReq))
+		return srv.(ClusterManagementServer).JoinCluster(ctx, req.(*PeerList))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterManagement_LeaveCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(google_protobuf.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterManagementServer).LeaveCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/networkdb.ClusterManagement/LeaveCluster",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterManagementServer).LeaveCluster(ctx, req.(*google_protobuf.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -183,8 +237,16 @@ var _ClusterManagement_serviceDesc = grpc.ServiceDesc{
 	HandlerType: (*ClusterManagementServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "StateCluster",
+			Handler:    _ClusterManagement_StateCluster_Handler,
+		},
+		{
 			MethodName: "JoinCluster",
 			Handler:    _ClusterManagement_JoinCluster_Handler,
+		},
+		{
+			MethodName: "LeaveCluster",
+			Handler:    _ClusterManagement_LeaveCluster_Handler,
 		},
 		{
 			MethodName: "PeersCluster",
@@ -199,10 +261,9 @@ var _ClusterManagement_serviceDesc = grpc.ServiceDesc{
 
 type GroupManagementClient interface {
 	// // Group operations
-	JoinGroup(ctx context.Context, in *GroupID, opts ...grpc.CallOption) (*Result, error)
-	LeaveGroup(ctx context.Context, in *GroupID, opts ...grpc.CallOption) (*Result, error)
-	// rpc ListGroup () return (Result) {}
-	PeersGroup(ctx context.Context, in *GroupID, opts ...grpc.CallOption) (*PeerList, error)
+	JoinGroup(ctx context.Context, in *Group, opts ...grpc.CallOption) (*Result, error)
+	LeaveGroup(ctx context.Context, in *Group, opts ...grpc.CallOption) (*Result, error)
+	PeersGroup(ctx context.Context, in *Group, opts ...grpc.CallOption) (*PeerList, error)
 }
 
 type groupManagementClient struct {
@@ -213,7 +274,7 @@ func NewGroupManagementClient(cc *grpc.ClientConn) GroupManagementClient {
 	return &groupManagementClient{cc}
 }
 
-func (c *groupManagementClient) JoinGroup(ctx context.Context, in *GroupID, opts ...grpc.CallOption) (*Result, error) {
+func (c *groupManagementClient) JoinGroup(ctx context.Context, in *Group, opts ...grpc.CallOption) (*Result, error) {
 	out := new(Result)
 	err := grpc.Invoke(ctx, "/networkdb.GroupManagement/JoinGroup", in, out, c.cc, opts...)
 	if err != nil {
@@ -222,7 +283,7 @@ func (c *groupManagementClient) JoinGroup(ctx context.Context, in *GroupID, opts
 	return out, nil
 }
 
-func (c *groupManagementClient) LeaveGroup(ctx context.Context, in *GroupID, opts ...grpc.CallOption) (*Result, error) {
+func (c *groupManagementClient) LeaveGroup(ctx context.Context, in *Group, opts ...grpc.CallOption) (*Result, error) {
 	out := new(Result)
 	err := grpc.Invoke(ctx, "/networkdb.GroupManagement/LeaveGroup", in, out, c.cc, opts...)
 	if err != nil {
@@ -231,7 +292,7 @@ func (c *groupManagementClient) LeaveGroup(ctx context.Context, in *GroupID, opt
 	return out, nil
 }
 
-func (c *groupManagementClient) PeersGroup(ctx context.Context, in *GroupID, opts ...grpc.CallOption) (*PeerList, error) {
+func (c *groupManagementClient) PeersGroup(ctx context.Context, in *Group, opts ...grpc.CallOption) (*PeerList, error) {
 	out := new(PeerList)
 	err := grpc.Invoke(ctx, "/networkdb.GroupManagement/PeersGroup", in, out, c.cc, opts...)
 	if err != nil {
@@ -244,10 +305,9 @@ func (c *groupManagementClient) PeersGroup(ctx context.Context, in *GroupID, opt
 
 type GroupManagementServer interface {
 	// // Group operations
-	JoinGroup(context.Context, *GroupID) (*Result, error)
-	LeaveGroup(context.Context, *GroupID) (*Result, error)
-	// rpc ListGroup () return (Result) {}
-	PeersGroup(context.Context, *GroupID) (*PeerList, error)
+	JoinGroup(context.Context, *Group) (*Result, error)
+	LeaveGroup(context.Context, *Group) (*Result, error)
+	PeersGroup(context.Context, *Group) (*PeerList, error)
 }
 
 func RegisterGroupManagementServer(s *grpc.Server, srv GroupManagementServer) {
@@ -255,7 +315,7 @@ func RegisterGroupManagementServer(s *grpc.Server, srv GroupManagementServer) {
 }
 
 func _GroupManagement_JoinGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GroupID)
+	in := new(Group)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -267,13 +327,13 @@ func _GroupManagement_JoinGroup_Handler(srv interface{}, ctx context.Context, de
 		FullMethod: "/networkdb.GroupManagement/JoinGroup",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GroupManagementServer).JoinGroup(ctx, req.(*GroupID))
+		return srv.(GroupManagementServer).JoinGroup(ctx, req.(*Group))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _GroupManagement_LeaveGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GroupID)
+	in := new(Group)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -285,13 +345,13 @@ func _GroupManagement_LeaveGroup_Handler(srv interface{}, ctx context.Context, d
 		FullMethod: "/networkdb.GroupManagement/LeaveGroup",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GroupManagementServer).LeaveGroup(ctx, req.(*GroupID))
+		return srv.(GroupManagementServer).LeaveGroup(ctx, req.(*Group))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _GroupManagement_PeersGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GroupID)
+	in := new(Group)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -303,7 +363,7 @@ func _GroupManagement_PeersGroup_Handler(srv interface{}, ctx context.Context, d
 		FullMethod: "/networkdb.GroupManagement/PeersGroup",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GroupManagementServer).PeersGroup(ctx, req.(*GroupID))
+		return srv.(GroupManagementServer).PeersGroup(ctx, req.(*Group))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -333,13 +393,13 @@ var _GroupManagement_serviceDesc = grpc.ServiceDesc{
 
 type EntryManagementClient interface {
 	// Entry operations
-	CreateEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*Result, error)
-	ReadEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*EntryIn, error)
-	UpdateEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*Result, error)
-	DeleteEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*Result, error)
+	CreateEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*Result, error)
+	ReadEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*TableEntry, error)
+	UpdateEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*Result, error)
+	DeleteEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*Result, error)
 	// Table operations
-	ReadTable(ctx context.Context, in *TableID, opts ...grpc.CallOption) (*EntryList, error)
-	WatchTable(ctx context.Context, in *TableID, opts ...grpc.CallOption) (EntryManagement_WatchTableClient, error)
+	ReadTable(ctx context.Context, in *Table, opts ...grpc.CallOption) (*EntryList, error)
+	WatchTable(ctx context.Context, in *Table, opts ...grpc.CallOption) (EntryManagement_WatchTableClient, error)
 }
 
 type entryManagementClient struct {
@@ -350,7 +410,7 @@ func NewEntryManagementClient(cc *grpc.ClientConn) EntryManagementClient {
 	return &entryManagementClient{cc}
 }
 
-func (c *entryManagementClient) CreateEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*Result, error) {
+func (c *entryManagementClient) CreateEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*Result, error) {
 	out := new(Result)
 	err := grpc.Invoke(ctx, "/networkdb.EntryManagement/CreateEntryRpc", in, out, c.cc, opts...)
 	if err != nil {
@@ -359,8 +419,8 @@ func (c *entryManagementClient) CreateEntryRpc(ctx context.Context, in *EntryIn,
 	return out, nil
 }
 
-func (c *entryManagementClient) ReadEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*EntryIn, error) {
-	out := new(EntryIn)
+func (c *entryManagementClient) ReadEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*TableEntry, error) {
+	out := new(TableEntry)
 	err := grpc.Invoke(ctx, "/networkdb.EntryManagement/ReadEntryRpc", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
@@ -368,7 +428,7 @@ func (c *entryManagementClient) ReadEntryRpc(ctx context.Context, in *EntryIn, o
 	return out, nil
 }
 
-func (c *entryManagementClient) UpdateEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*Result, error) {
+func (c *entryManagementClient) UpdateEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*Result, error) {
 	out := new(Result)
 	err := grpc.Invoke(ctx, "/networkdb.EntryManagement/UpdateEntryRpc", in, out, c.cc, opts...)
 	if err != nil {
@@ -377,7 +437,7 @@ func (c *entryManagementClient) UpdateEntryRpc(ctx context.Context, in *EntryIn,
 	return out, nil
 }
 
-func (c *entryManagementClient) DeleteEntryRpc(ctx context.Context, in *EntryIn, opts ...grpc.CallOption) (*Result, error) {
+func (c *entryManagementClient) DeleteEntryRpc(ctx context.Context, in *TableEntry, opts ...grpc.CallOption) (*Result, error) {
 	out := new(Result)
 	err := grpc.Invoke(ctx, "/networkdb.EntryManagement/DeleteEntryRpc", in, out, c.cc, opts...)
 	if err != nil {
@@ -386,7 +446,7 @@ func (c *entryManagementClient) DeleteEntryRpc(ctx context.Context, in *EntryIn,
 	return out, nil
 }
 
-func (c *entryManagementClient) ReadTable(ctx context.Context, in *TableID, opts ...grpc.CallOption) (*EntryList, error) {
+func (c *entryManagementClient) ReadTable(ctx context.Context, in *Table, opts ...grpc.CallOption) (*EntryList, error) {
 	out := new(EntryList)
 	err := grpc.Invoke(ctx, "/networkdb.EntryManagement/ReadTable", in, out, c.cc, opts...)
 	if err != nil {
@@ -395,7 +455,7 @@ func (c *entryManagementClient) ReadTable(ctx context.Context, in *TableID, opts
 	return out, nil
 }
 
-func (c *entryManagementClient) WatchTable(ctx context.Context, in *TableID, opts ...grpc.CallOption) (EntryManagement_WatchTableClient, error) {
+func (c *entryManagementClient) WatchTable(ctx context.Context, in *Table, opts ...grpc.CallOption) (EntryManagement_WatchTableClient, error) {
 	stream, err := grpc.NewClientStream(ctx, &_EntryManagement_serviceDesc.Streams[0], c.cc, "/networkdb.EntryManagement/WatchTable", opts...)
 	if err != nil {
 		return nil, err
@@ -431,13 +491,13 @@ func (x *entryManagementWatchTableClient) Recv() (*TableEvent, error) {
 
 type EntryManagementServer interface {
 	// Entry operations
-	CreateEntryRpc(context.Context, *EntryIn) (*Result, error)
-	ReadEntryRpc(context.Context, *EntryIn) (*EntryIn, error)
-	UpdateEntryRpc(context.Context, *EntryIn) (*Result, error)
-	DeleteEntryRpc(context.Context, *EntryIn) (*Result, error)
+	CreateEntryRpc(context.Context, *TableEntry) (*Result, error)
+	ReadEntryRpc(context.Context, *TableEntry) (*TableEntry, error)
+	UpdateEntryRpc(context.Context, *TableEntry) (*Result, error)
+	DeleteEntryRpc(context.Context, *TableEntry) (*Result, error)
 	// Table operations
-	ReadTable(context.Context, *TableID) (*EntryList, error)
-	WatchTable(*TableID, EntryManagement_WatchTableServer) error
+	ReadTable(context.Context, *Table) (*EntryList, error)
+	WatchTable(*Table, EntryManagement_WatchTableServer) error
 }
 
 func RegisterEntryManagementServer(s *grpc.Server, srv EntryManagementServer) {
@@ -445,7 +505,7 @@ func RegisterEntryManagementServer(s *grpc.Server, srv EntryManagementServer) {
 }
 
 func _EntryManagement_CreateEntryRpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EntryIn)
+	in := new(TableEntry)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -457,13 +517,13 @@ func _EntryManagement_CreateEntryRpc_Handler(srv interface{}, ctx context.Contex
 		FullMethod: "/networkdb.EntryManagement/CreateEntryRpc",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(EntryManagementServer).CreateEntryRpc(ctx, req.(*EntryIn))
+		return srv.(EntryManagementServer).CreateEntryRpc(ctx, req.(*TableEntry))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _EntryManagement_ReadEntryRpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EntryIn)
+	in := new(TableEntry)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -475,13 +535,13 @@ func _EntryManagement_ReadEntryRpc_Handler(srv interface{}, ctx context.Context,
 		FullMethod: "/networkdb.EntryManagement/ReadEntryRpc",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(EntryManagementServer).ReadEntryRpc(ctx, req.(*EntryIn))
+		return srv.(EntryManagementServer).ReadEntryRpc(ctx, req.(*TableEntry))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _EntryManagement_UpdateEntryRpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EntryIn)
+	in := new(TableEntry)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -493,13 +553,13 @@ func _EntryManagement_UpdateEntryRpc_Handler(srv interface{}, ctx context.Contex
 		FullMethod: "/networkdb.EntryManagement/UpdateEntryRpc",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(EntryManagementServer).UpdateEntryRpc(ctx, req.(*EntryIn))
+		return srv.(EntryManagementServer).UpdateEntryRpc(ctx, req.(*TableEntry))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _EntryManagement_DeleteEntryRpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EntryIn)
+	in := new(TableEntry)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -511,13 +571,13 @@ func _EntryManagement_DeleteEntryRpc_Handler(srv interface{}, ctx context.Contex
 		FullMethod: "/networkdb.EntryManagement/DeleteEntryRpc",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(EntryManagementServer).DeleteEntryRpc(ctx, req.(*EntryIn))
+		return srv.(EntryManagementServer).DeleteEntryRpc(ctx, req.(*TableEntry))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _EntryManagement_ReadTable_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(TableID)
+	in := new(Table)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -529,13 +589,13 @@ func _EntryManagement_ReadTable_Handler(srv interface{}, ctx context.Context, de
 		FullMethod: "/networkdb.EntryManagement/ReadTable",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(EntryManagementServer).ReadTable(ctx, req.(*TableID))
+		return srv.(EntryManagementServer).ReadTable(ctx, req.(*Table))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _EntryManagement_WatchTable_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(TableID)
+	m := new(Table)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
@@ -594,7 +654,6 @@ var _EntryManagement_serviceDesc = grpc.ServiceDesc{
 
 type DiagnoseManagementClient interface {
 	Ready(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (*Result, error)
-	WatchTest(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (DiagnoseManagement_WatchTestClient, error)
 }
 
 type diagnoseManagementClient struct {
@@ -614,43 +673,10 @@ func (c *diagnoseManagementClient) Ready(ctx context.Context, in *google_protobu
 	return out, nil
 }
 
-func (c *diagnoseManagementClient) WatchTest(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (DiagnoseManagement_WatchTestClient, error) {
-	stream, err := grpc.NewClientStream(ctx, &_DiagnoseManagement_serviceDesc.Streams[0], c.cc, "/networkdb.DiagnoseManagement/WatchTest", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &diagnoseManagementWatchTestClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type DiagnoseManagement_WatchTestClient interface {
-	Recv() (*Result, error)
-	grpc.ClientStream
-}
-
-type diagnoseManagementWatchTestClient struct {
-	grpc.ClientStream
-}
-
-func (x *diagnoseManagementWatchTestClient) Recv() (*Result, error) {
-	m := new(Result)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 // Server API for DiagnoseManagement service
 
 type DiagnoseManagementServer interface {
 	Ready(context.Context, *google_protobuf.Empty) (*Result, error)
-	WatchTest(*google_protobuf.Empty, DiagnoseManagement_WatchTestServer) error
 }
 
 func RegisterDiagnoseManagementServer(s *grpc.Server, srv DiagnoseManagementServer) {
@@ -675,27 +701,6 @@ func _DiagnoseManagement_Ready_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DiagnoseManagement_WatchTest_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(google_protobuf.Empty)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(DiagnoseManagementServer).WatchTest(m, &diagnoseManagementWatchTestServer{stream})
-}
-
-type DiagnoseManagement_WatchTestServer interface {
-	Send(*Result) error
-	grpc.ServerStream
-}
-
-type diagnoseManagementWatchTestServer struct {
-	grpc.ServerStream
-}
-
-func (x *diagnoseManagementWatchTestServer) Send(m *Result) error {
-	return x.ServerStream.SendMsg(m)
-}
-
 var _DiagnoseManagement_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "networkdb.DiagnoseManagement",
 	HandlerType: (*DiagnoseManagementServer)(nil),
@@ -705,43 +710,37 @@ var _DiagnoseManagement_serviceDesc = grpc.ServiceDesc{
 			Handler:    _DiagnoseManagement_Ready_Handler,
 		},
 	},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "WatchTest",
-			Handler:       _DiagnoseManagement_WatchTest_Handler,
-			ServerStreams: true,
-		},
-	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "rpcif.proto",
 }
 
 func init() { proto.RegisterFile("rpcif.proto", fileDescriptor1) }
 
 var fileDescriptor1 = []byte{
-	// 388 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x9c, 0x92, 0xdd, 0xce, 0xd2, 0x40,
-	0x10, 0x86, 0xa9, 0x89, 0x26, 0x1d, 0x08, 0x84, 0xf5, 0xbf, 0x9e, 0x71, 0x01, 0x85, 0xa0, 0x06,
-	0xd1, 0x70, 0x44, 0x89, 0xa9, 0xc1, 0xc4, 0x34, 0xfe, 0x1c, 0x6f, 0x61, 0xa8, 0x1b, 0xcb, 0x6e,
-	0xdd, 0xdd, 0x62, 0xf0, 0x02, 0x3c, 0xf7, 0x6a, 0xbc, 0x2f, 0xaf, 0xc0, 0xec, 0x56, 0xbe, 0x6c,
-	0x49, 0xfb, 0x25, 0x70, 0xc8, 0x3b, 0xfb, 0xcc, 0x3c, 0x43, 0x07, 0xba, 0xb2, 0xd8, 0xb0, 0x5d,
-	0x58, 0x48, 0xa1, 0x05, 0xf1, 0x39, 0xea, 0x1f, 0x42, 0x7e, 0xdb, 0xa6, 0xc1, 0xb3, 0x4c, 0x88,
-	0x2c, 0xc7, 0xb1, 0x2d, 0xa4, 0xe5, 0x6e, 0x8c, 0xfb, 0x42, 0x1f, 0xab, 0x77, 0x41, 0x7f, 0x8f,
-	0x4a, 0xd1, 0x0c, 0x55, 0xf5, 0x7b, 0xfa, 0x19, 0x1e, 0x2f, 0x05, 0xdf, 0xb1, 0xac, 0x94, 0x54,
-	0x33, 0xc1, 0xdf, 0x53, 0x4e, 0x33, 0xdc, 0x23, 0xd7, 0xe4, 0x0d, 0x40, 0xcc, 0x99, 0x66, 0x34,
-	0x67, 0x3f, 0x91, 0x3c, 0x09, 0x6f, 0x26, 0x84, 0x35, 0x22, 0x18, 0x3a, 0x95, 0x04, 0x55, 0x99,
-	0xeb, 0x51, 0x67, 0xfa, 0xdb, 0x83, 0xe1, 0x32, 0x2f, 0x95, 0x46, 0xe9, 0xb4, 0x5c, 0x40, 0xf7,
-	0x9d, 0x60, 0xfc, 0x7f, 0x81, 0x3c, 0x75, 0x48, 0x27, 0x4f, 0xf0, 0x7b, 0x63, 0x53, 0xb2, 0x80,
-	0xde, 0x07, 0x44, 0xa9, 0x4e, 0xfc, 0xa3, 0xb0, 0x5a, 0x35, 0x3c, 0xad, 0x1a, 0xae, 0xcc, 0xaa,
-	0xc1, 0x7d, 0x07, 0x36, 0xc0, 0x9a, 0x29, 0xe3, 0xf4, 0xc7, 0x83, 0xc1, 0x5b, 0x29, 0xca, 0xc2,
-	0x31, 0x7a, 0x01, 0xbe, 0x99, 0x6c, 0x63, 0x42, 0x1c, 0xce, 0x26, 0x71, 0xd4, 0x2c, 0xf2, 0x12,
-	0x60, 0x8d, 0xf4, 0x80, 0x17, 0x62, 0x33, 0x00, 0xeb, 0xdf, 0x8e, 0xb5, 0x98, 0xff, 0xbd, 0x03,
-	0x83, 0x15, 0xd7, 0xf2, 0xe8, 0x98, 0xcf, 0xa1, 0xbf, 0x94, 0x48, 0x35, 0xda, 0x42, 0x52, 0x6c,
-	0x6a, 0x0d, 0x6d, 0x18, 0x37, 0x7f, 0x1c, 0xf2, 0x0a, 0x7a, 0x09, 0xd2, 0xed, 0xad, 0x60, 0x43,
-	0x36, 0xea, 0x98, 0xa1, 0x9f, 0x8a, 0xed, 0x55, 0x43, 0xe7, 0xd0, 0x8f, 0x30, 0xc7, 0x6b, 0xd0,
-	0x19, 0xf8, 0xc6, 0xf7, 0x23, 0x4d, 0x73, 0xac, 0x51, 0x36, 0x89, 0xa3, 0xe0, 0xc1, 0x79, 0xa7,
-	0xea, 0x7f, 0x33, 0x27, 0xfc, 0x85, 0xea, 0xcd, 0xd7, 0x76, 0xf2, 0xe1, 0x79, 0xb6, 0x3a, 0x20,
-	0xd7, 0xa3, 0xce, 0xc4, 0x9b, 0xfe, 0xf2, 0x80, 0x44, 0x8c, 0x66, 0x5c, 0x28, 0xac, 0x5d, 0xcc,
-	0x5d, 0x23, 0x73, 0x6c, 0xbd, 0xbe, 0xc6, 0x15, 0x5e, 0x83, 0x5f, 0x99, 0xa0, 0xd2, 0x17, 0x91,
-	0x13, 0x2f, 0xbd, 0x67, 0x9f, 0x3d, 0xff, 0x17, 0x00, 0x00, 0xff, 0xff, 0x99, 0x70, 0x0b, 0x71,
-	0xf1, 0x03, 0x00, 0x00,
+	// 396 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x9c, 0x92, 0x6d, 0x8b, 0xda, 0x40,
+	0x10, 0xc7, 0xa3, 0xd0, 0x82, 0x63, 0xd0, 0xba, 0x7d, 0xb0, 0xa4, 0xef, 0xf2, 0x01, 0x62, 0x89,
+	0x95, 0x52, 0xb4, 0x85, 0xa2, 0x52, 0x2a, 0x16, 0x8a, 0xf7, 0xf4, 0x7a, 0xa3, 0x63, 0x6e, 0xb9,
+	0xb8, 0x1b, 0x76, 0x37, 0x1e, 0xde, 0x57, 0xb8, 0x4f, 0x73, 0x1f, 0xf0, 0xe0, 0xc8, 0xe6, 0x3c,
+	0x56, 0x2e, 0x22, 0xfa, 0xd2, 0x99, 0xf9, 0xcd, 0xff, 0xb7, 0x63, 0xa0, 0x2e, 0xd3, 0x39, 0x5b,
+	0x06, 0xa9, 0x14, 0x5a, 0x90, 0x1a, 0x47, 0x7d, 0x2b, 0xe4, 0xcd, 0x22, 0xf2, 0xbe, 0xc4, 0x42,
+	0xc4, 0x09, 0x76, 0x4c, 0x23, 0xca, 0x96, 0x1d, 0x5c, 0xa5, 0x7a, 0x53, 0xcc, 0x79, 0x8d, 0x15,
+	0x2a, 0x45, 0x63, 0x54, 0xc5, 0xef, 0xf0, 0x12, 0xda, 0x43, 0xc1, 0x97, 0x2c, 0xce, 0x24, 0xd5,
+	0x4c, 0xf0, 0x7f, 0x94, 0xd3, 0x18, 0x57, 0xc8, 0x35, 0xe9, 0x03, 0xfc, 0xe5, 0x4c, 0x33, 0x9a,
+	0xb0, 0x3b, 0x24, 0x9f, 0x83, 0x97, 0x84, 0x60, 0x87, 0xf0, 0x5a, 0x56, 0x67, 0x86, 0x2a, 0x4b,
+	0xb4, 0xef, 0x84, 0xf7, 0x55, 0x68, 0x0d, 0x93, 0x4c, 0x69, 0x94, 0xd6, 0xca, 0xdf, 0xe0, 0x9e,
+	0x69, 0xaa, 0xf1, 0xb9, 0x43, 0x3e, 0x05, 0x85, 0x6b, 0xb0, 0x75, 0x0d, 0xc6, 0xb9, 0xab, 0xd7,
+	0xb6, 0xc3, 0x8a, 0x59, 0xc3, 0xf9, 0x0e, 0xf9, 0x0e, 0xf5, 0x89, 0x60, 0x7c, 0xbb, 0xe1, 0xbd,
+	0x35, 0xf9, 0x1f, 0x51, 0x4e, 0x99, 0xd2, 0xa5, 0x46, 0xa4, 0x0f, 0xee, 0x14, 0xe9, 0xfa, 0x60,
+	0x76, 0x29, 0xfc, 0x13, 0xdc, 0x7c, 0xbb, 0x3a, 0x04, 0x97, 0xe9, 0xf8, 0x4e, 0xf8, 0x50, 0x81,
+	0xe6, 0x1f, 0x29, 0xb2, 0xd4, 0xba, 0x45, 0x08, 0xb5, 0xfc, 0x21, 0xa6, 0x4c, 0xde, 0x59, 0x9c,
+	0xa9, 0x94, 0x6b, 0x74, 0x01, 0xcc, 0x1b, 0x8e, 0x82, 0x7a, 0x00, 0xc6, 0x7d, 0x1f, 0xb4, 0xc7,
+	0xf9, 0xb1, 0x0a, 0xcd, 0x31, 0xd7, 0x72, 0x63, 0x39, 0x0f, 0xa0, 0x31, 0x94, 0x48, 0x35, 0x9a,
+	0xc6, 0x2c, 0x9d, 0x93, 0x8f, 0x16, 0x7c, 0x4e, 0xa3, 0xa4, 0xe8, 0x94, 0x8b, 0xfc, 0x02, 0x77,
+	0x86, 0x74, 0x71, 0x88, 0x2d, 0x2f, 0xfb, 0x4e, 0x9e, 0x7e, 0x91, 0x2e, 0x4e, 0x4d, 0x1f, 0x40,
+	0x63, 0x84, 0x09, 0x9e, 0x48, 0xf7, 0xa0, 0x96, 0xbb, 0x9b, 0xb1, 0x9d, 0x1b, 0x9a, 0x8a, 0xf7,
+	0xc1, 0xaa, 0x98, 0x2d, 0xc5, 0x11, 0xc9, 0x0f, 0x80, 0x2b, 0xaa, 0xe7, 0xd7, 0xfb, 0xb8, 0xd7,
+	0x0a, 0x6b, 0xe4, 0xda, 0x77, 0xbe, 0x56, 0xc2, 0x09, 0x90, 0x11, 0xa3, 0x31, 0x17, 0x0a, 0xad,
+	0x7f, 0xe0, 0x1b, 0xbc, 0xc9, 0x3d, 0x36, 0x47, 0x7d, 0xbe, 0xd1, 0x5b, 0x33, 0xd4, 0x7d, 0x0a,
+	0x00, 0x00, 0xff, 0xff, 0x77, 0x3c, 0x7d, 0x73, 0x33, 0x04, 0x00, 0x00,
 }

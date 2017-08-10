@@ -10,8 +10,6 @@ enum OperationResult {
 
 message Result {
   OperationResult status = 1;
-  string error = 2;
-  bytes data = 3;
 }
 
 message Configuration {
@@ -26,21 +24,32 @@ message Configuration {
   repeated bytes keys = 4;
 }
 
-message JoinClusterReq {
-  repeated string members = 1;
+enum State {
+  // healthy state, everything looks good
+  HEALTHY = 0;
+  // experiencing some failure, performance is degradated but not unrecoverable
+  TRANSIENT_FAILURE = 1;
+  // criticl condition, the functionality is compromised
+  FAILED = 2;
+  // waiting for initialization
+  NOT_INITIALIZED = 3;
 }
 
-message GroupID {
+message ClusterState {
+  State status = 1;
+}
+
+message Group {
   string groupName = 1;
 }
 
-message TableID {
-  GroupID group = 1;
+message Table {
+  Group group = 1;
   string tableName = 2;
 }
 
-message EntryIn {
-  TableID table = 1;
+message TableEntry {
+  Table table = 1;
   Entry entry = 2;
 }
 
@@ -50,7 +59,7 @@ message Entry {
 }
 
 message EntryList {
-  TableID table = 1;
+  Table table = 1;
   repeated Entry list = 2;
 }
 
@@ -71,6 +80,6 @@ enum TableOperation {
 
 message TableEvent {
   TableOperation operation = 1;
-  TableID table = 2;
+  Table table = 2;
   Entry entry = 3;
 }

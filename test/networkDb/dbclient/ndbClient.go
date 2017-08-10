@@ -52,7 +52,11 @@ func joinCluster(ip, port string, members []string, doneCh chan resultTuple) {
 
 	client := rpc.NewClusterManagementClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
-	result, err := client.JoinCluster(ctx, &rpc.JoinClusterReq{Members: members})
+	peerList := make([]*rpc.Peer, 0, len(members))
+	for _, peerIP := range members {
+		peerList = append(peerList, &rpc.Peer{Ip: peerIP})
+	}
+	result, err := client.JoinCluster(ctx, &rpc.PeerList{Peers: peerList})
 	cancel()
 	resultOKorFatal(ip, err, result)
 
@@ -66,7 +70,7 @@ func joinNetwork(ip, port, networkName string, doneCh chan resultTuple) {
 	defer conn.Close()
 	client := rpc.NewGroupManagementClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
-	result, err := client.JoinGroup(ctx, &rpc.GroupID{GroupName: networkName})
+	result, err := client.JoinGroup(ctx, &rpc.Group{GroupName: networkName})
 	cancel()
 	resultOKorFatal(ip, err, result)
 
@@ -80,7 +84,7 @@ func leaveNetwork(ip, port, networkName string, doneCh chan resultTuple) {
 	defer conn.Close()
 	client := rpc.NewGroupManagementClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
-	result, err := client.LeaveGroup(ctx, &rpc.GroupID{GroupName: networkName})
+	result, err := client.LeaveGroup(ctx, &rpc.Group{GroupName: networkName})
 	cancel()
 	resultOKorFatal(ip, err, result)
 
@@ -89,28 +93,24 @@ func leaveNetwork(ip, port, networkName string, doneCh chan resultTuple) {
 	}
 }
 
-func writeTableKey(ip, port, networkName, tableName, key string) {
-	conn := rpcClientFatalError(ip, port)
-	defer conn.Close()
+func writeTableKey(conn *grpc.ClientConn, ip, networkName, tableName, key string) {
 	client := rpc.NewEntryManagementClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	result, err := client.CreateEntryRpc(ctx,
-		&rpc.EntryIn{
-			Table: &rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName},
+		&rpc.TableEntry{
+			Table: &rpc.Table{Group: &rpc.Group{GroupName: networkName}, TableName: tableName},
 			Entry: &rpc.Entry{Key: key, Value: []byte("v")},
 		})
 	cancel()
 	resultOKorFatal(ip, err, result)
 }
 
-func deleteTableKey(ip, port, networkName, tableName, key string) {
-	conn := rpcClientFatalError(ip, port)
-	defer conn.Close()
+func deleteTableKey(conn *grpc.ClientConn, ip, networkName, tableName, key string) {
 	client := rpc.NewEntryManagementClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	result, err := client.DeleteEntryRpc(ctx,
-		&rpc.EntryIn{
-			Table: &rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName},
+		&rpc.TableEntry{
+			Table: &rpc.Table{Group: &rpc.Group{GroupName: networkName}, TableName: tableName},
 			Entry: &rpc.Entry{Key: key},
 		})
 	cancel()
@@ -137,7 +137,7 @@ func networkPeersNumber(ip, port, networkName string, doneCh chan resultTuple) {
 	defer conn.Close()
 	client := rpc.NewGroupManagementClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
-	peers, err := client.PeersGroup(ctx, &rpc.GroupID{GroupName: networkName})
+	peers, err := client.PeersGroup(ctx, &rpc.Group{GroupName: networkName})
 	cancel()
 	if err != nil {
 		logrus.Errorf("networkPeersNumber %s there was an error: %s\n", ip, err)
@@ -154,7 +154,7 @@ func dbTableEntriesNumber(ip, port, networkName, tableName string, doneCh chan r
 	client := rpc.NewEntryManagementClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	entryList, err := client.ReadTable(ctx,
-		&rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName})
+		&rpc.Table{Group: &rpc.Group{GroupName: networkName}, TableName: tableName})
 	cancel()
 	if err != nil {
 		logrus.Errorf("dbTableEntriesNumber %s there was an error: %s\n", ip, err)
@@ -169,7 +169,7 @@ func clientWatchTable(ctx context.Context, ip, port, networkName, tableName stri
 	conn := rpcClientFatalError(ip, port)
 	defer conn.Close()
 	client := rpc.NewEntryManagementClient(conn)
-	stream, err := client.WatchTable(ctx, &rpc.TableID{Group: &rpc.GroupID{GroupName: networkName}, TableName: tableName})
+	stream, err := client.WatchTable(ctx, &rpc.Table{Group: &rpc.Group{GroupName: networkName}, TableName: tableName})
 	if err != nil {
 		// Connection failed
 		if doneCh != nil {
@@ -222,6 +222,8 @@ func clientTableEntries(ips []string, clientTables map[string]map[string]string,
 }
 
 func writeUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
 	for x := 0; ; x++ {
 		select {
 		case <-ctx.Done():
@@ -230,7 +232,7 @@ func writeUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key 
 		default:
 			k := key + strconv.Itoa(x)
 			// write key
-			writeTableKey(ip, port, networkName, tableName, k)
+			writeTableKey(conn, ip, networkName, tableName, k)
 			// give time to send out key writes
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -238,6 +240,8 @@ func writeUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key 
 }
 
 func writeDeleteUniqueKeys(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
 	for x := 0; ; x++ {
 		select {
 		case <-ctx.Done():
@@ -246,16 +250,18 @@ func writeDeleteUniqueKeys(ctx context.Context, ip, port, networkName, tableName
 		default:
 			k := key + strconv.Itoa(x)
 			// write key
-			writeTableKey(ip, port, networkName, tableName, k)
+			writeTableKey(conn, ip, networkName, tableName, k)
 			// give time to send out key writes
 			time.Sleep(100 * time.Millisecond)
 			// delete key
-			deleteTableKey(ip, port, networkName, tableName, k)
+			deleteTableKey(conn, ip, networkName, tableName, k)
 		}
 	}
 }
 
 func writeDeleteLeaveJoin(ctx context.Context, ip, port, networkName, tableName, key string, doneCh chan resultTuple) {
+	conn := rpcClientFatalError(ip, port)
+	defer conn.Close()
 	for x := 0; ; x++ {
 		select {
 		case <-ctx.Done():
@@ -264,10 +270,10 @@ func writeDeleteLeaveJoin(ctx context.Context, ip, port, networkName, tableName,
 		default:
 			k := key + strconv.Itoa(x)
 			// write key
-			writeTableKey(ip, port, networkName, tableName, k)
+			writeTableKey(conn, ip, networkName, tableName, k)
 			time.Sleep(100 * time.Millisecond)
 			// delete key
-			deleteTableKey(ip, port, networkName, tableName, k)
+			deleteTableKey(conn, ip, networkName, tableName, k)
 			// give some time
 			time.Sleep(100 * time.Millisecond)
 			// leave network
@@ -314,43 +320,12 @@ func ready(ip, port string, doneCh chan resultTuple) {
 			client := rpc.NewDiagnoseManagementClient(conn)
 			ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 			result, err := client.Ready(ctx, &google_protobuf.Empty{})
-			logrus.Errorf("The err is: %s and the result:%v", err, result)
+			logrus.Infof("The err is: %s and the result:%v", err, result.Status)
 			cancel()
 			if err != nil || result.Status != rpc.OperationResult_SUCCESS {
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
-			// success
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	// notify the completion
-	doneCh <- resultTuple{id: ip, result: 0}
-}
-
-func testStream(ip, port string, doneCh chan resultTuple) {
-	for {
-		conn, err := rpcClient(ip, port)
-		if err == nil {
-			client := rpc.NewDiagnoseManagementClient(conn)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			stream, err := client.WatchTest(ctx, &google_protobuf.Empty{})
-			logrus.Errorf("The err is: %s and the result:%v", err, stream)
-			i := 0
-			for {
-				res, err := stream.Recv()
-				i++
-				if err != nil {
-					logrus.Errorf("The err is: %s", err)
-					break
-				}
-				logrus.Errorf("%d res is:%v", i, res)
-				if i == 3 {
-					stream.CloseSend()
-				}
-			}
-			cancel()
 			// success
 			break
 		}
@@ -447,19 +422,6 @@ func doReady(ips []string) {
 	// check all the nodes
 	for _, ip := range ips {
 		go ready(ip, servicePort, doneCh)
-	}
-	// wait for the readiness of all nodes
-	for i := len(ips); i > 0; i-- {
-		<-doneCh
-	}
-	close(doneCh)
-}
-
-func doTestStream(ips []string) {
-	doneCh := make(chan resultTuple, len(ips))
-	// check all the nodes
-	for _, ip := range ips {
-		go testStream(ip, servicePort, doneCh)
 	}
 	// wait for the readiness of all nodes
 	for i := len(ips); i > 0; i-- {
@@ -841,8 +803,6 @@ func Client(args []string) {
 		doInitialize(ips)
 	case "ready":
 		doReady(ips)
-	case "test-stream":
-		doTestStream(ips)
 	case "join":
 		doJoin(ips)
 	case "leave":

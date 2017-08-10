@@ -12,7 +12,7 @@ CLIENT
 
 cd test/networkdb
 Init cluster: docker run -it --network net1 fcrisciani/networkdb-test-grpc client initialize testdb 5000
-Join cluster: docker run -it --network net1 fcrisciani/networkdb-test client join testdb 8000
-Join network: docker run -it --network net1 fcrisciani/networkdb-test client join-network testdb 8000 test
-Run test: docker run -it --network net1 fcrisciani/networkdb-test client write-delete-unique-keys testdb 8000 test tableBla 3 10
+Join cluster: docker run -it --network net1 fcrisciani/networkdb-test-grpc client join testdb 5000
+Join network: docker run -it --network net1 fcrisciani/networkdb-test-grpc client join-network testdb 5000 test
+Run test: docker run -it --network net1 fcrisciani/networkdb-test-grpc client write-delete-unique-keys testdb 5000 test tableBla 3 10
 check table: curl "localhost:32768/gettable?nid=test&tname=table_name"

@@ -6,19 +6,22 @@ import (
 	api "github.com/docker/libnetwork/components/api/networkdb"
 )
 
-func (s *Server) JoinGroup(ctx context.Context, group *api.GroupID) (*api.Result, error) {
+// JoinGroup rpc impl
+func (s *Server) JoinGroup(ctx context.Context, group *api.Group) (*api.Result, error) {
 	err := s.Database.JoinNetwork(group.GetGroupName())
 
 	return &api.Result{}, err
 }
 
-func (s *Server) LeaveGroup(ctx context.Context, group *api.GroupID) (*api.Result, error) {
+// LeaveGroup rpc impl
+func (s *Server) LeaveGroup(ctx context.Context, group *api.Group) (*api.Result, error) {
 	err := s.Database.LeaveNetwork(group.GetGroupName())
 
 	return &api.Result{}, err
 }
 
-func (s *Server) PeersGroup(ctx context.Context, group *api.GroupID) (*api.PeerList, error) {
+// PeersGroup rpc impl
+func (s *Server) PeersGroup(ctx context.Context, group *api.Group) (*api.PeerList, error) {
 	peers := s.Database.Peers(group.GetGroupName())
 
 	res := &api.PeerList{}

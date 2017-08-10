@@ -13,35 +13,35 @@ service ConfigurationManagement {
 }
 
 service ClusterManagement {
-  // // Cluster related operations
-  // rpc StateCluster () returns (State) {}
-  rpc JoinCluster (JoinClusterReq) returns (Result) {}
-  // rpc LeaveCluster () returns (Result) {}
+  // Cluster related operations
+  rpc StateCluster (google.protobuf.Empty) returns (ClusterState) {}
+  rpc JoinCluster (PeerList) returns (Result) {}
+  rpc LeaveCluster (google.protobuf.Empty) returns (Result) {}
   rpc PeersCluster (google.protobuf.Empty) returns (PeerList) {}
+  // TODO fcrisciani rpc WatchStateCluster() (stream ClusterState) {}
 }
 
 // Interface exported by the server.
 service GroupManagement {
   // // Group operations
-  rpc JoinGroup (GroupID) returns (Result) {}
-  rpc LeaveGroup (GroupID) returns (Result) {}
-  // rpc ListGroup () return (Result) {}
-  rpc PeersGroup (GroupID) returns (PeerList) {}
-  }
+  rpc JoinGroup (Group) returns (Result) {}
+  rpc LeaveGroup (Group) returns (Result) {}
+  rpc PeersGroup (Group) returns (PeerList) {}
+  // TODO fcrisciani rpc ListGroup (Group) returns (Result) {}
+}
 
 service EntryManagement {
   // Entry operations
-  rpc CreateEntryRpc (EntryIn) returns (Result) {}
-  rpc ReadEntryRpc (EntryIn) returns (EntryIn) {}
-  rpc UpdateEntryRpc (EntryIn) returns (Result) {}
-  rpc DeleteEntryRpc (EntryIn) returns (Result) {}
+  rpc CreateEntryRpc (TableEntry) returns (Result) {}
+  rpc ReadEntryRpc (TableEntry) returns (TableEntry) {}
+  rpc UpdateEntryRpc (TableEntry) returns (Result) {}
+  rpc DeleteEntryRpc (TableEntry) returns (Result) {}
 
   // Table operations
-  rpc ReadTable(TableID) returns (EntryList) {}
-  rpc WatchTable (TableID) returns (stream TableEvent) {}
+  rpc ReadTable (Table) returns (EntryList) {}
+  rpc WatchTable (Table) returns (stream TableEvent) {}
 }
 
 service DiagnoseManagement {
   rpc Ready (google.protobuf.Empty) returns (Result) {}
-  rpc WatchTest (google.protobuf.Empty) returns (stream Result) {}
 }

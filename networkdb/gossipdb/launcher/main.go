@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/Sirupsen/logrus"
 	"github.com/docker/libnetwork/networkdb/gossipdb"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {

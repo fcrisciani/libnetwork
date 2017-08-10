@@ -3,11 +3,12 @@ package gossipdb
 import (
 	context "golang.org/x/net/context"
 
-	"github.com/Sirupsen/logrus"
 	api "github.com/docker/libnetwork/components/api/networkdb"
 	"github.com/docker/libnetwork/networkdb"
+	"github.com/sirupsen/logrus"
 )
 
+// Initialize rpc impl
 func (s *Server) Initialize(ctx context.Context, config *api.Configuration) (*api.Result, error) {
 	logrus.Infof("Received the Initialize call")
 	netDBConf := networkdb.DefaultConfig()
@@ -23,6 +24,6 @@ func (s *Server) Initialize(ctx context.Context, config *api.Configuration) (*ap
 		api.RegisterEntryManagementServer(s.Srv, s)
 		api.RegisterDiagnoseManagementServer(s.Srv, s)
 	}
-
-	return &api.Result{}, err
+	logrus.Infof("Ending the Initialize call err:%s", err)
+	return &api.Result{Status: api.OperationResult_SUCCESS}, err
 }

@@ -7,9 +7,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/Sirupsen/logrus"
 	api "github.com/docker/libnetwork/components/api/networkdb"
 	"github.com/docker/libnetwork/networkdb"
+	"github.com/sirupsen/logrus"
 )
 
 type Server struct {
