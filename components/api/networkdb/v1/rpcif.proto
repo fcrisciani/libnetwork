@@ -1,0 +1,179 @@
+// compile: protoc --go_out=plugins=grpc:components/api/networkdb/v1/. -I components/api/networkdb components/api/networkdb/v1/*.proto
+
+syntax = "proto3";
+
+package libnetwork.networkdb.v1;
+
+//import "gogoproto/gogo.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/docker/libnetwork/components/api/networkdb/v1;networkdb";
+
+service ConfigurationManagement {
+  // Component initialization
+  rpc Initialize (InitializeRequest) returns (google.protobuf.Empty) {}
+}
+
+service ClusterManagement {
+  // Cluster related operations
+  rpc StateCluster (google.protobuf.Empty) returns (StateClusterResponse) {}
+  rpc JoinCluster (JoinClusterRequest) returns (google.protobuf.Empty) {}
+  rpc LeaveCluster (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  rpc PeersCluster (google.protobuf.Empty) returns (PeersClusterResponse) {}
+  // TODO fcrisciani rpc WatchStateCluster() (stream WatchStateClusterEvent) {}
+}
+
+// Interface exported by the server.
+service GroupManagement {
+  // // Group operations
+  rpc JoinGroup (JoinGroupRequest) returns (google.protobuf.Empty) {}
+  rpc LeaveGroup (LeaveGroupRequest) returns (google.protobuf.Empty) {}
+  rpc PeersGroup (PeerGroupRequest) returns (PeerGroupResponse) {}
+  // TODO fcrisciani rpc ListGroup (ListGroupRequest) returns (ListGroupResponse) {}
+}
+
+service EntryManagement {
+  // Entry operations
+  rpc CreateEntryRpc (CreateEntryRequest) returns (google.protobuf.Empty) {}
+  rpc ReadEntryRpc (ReadEntryRequest) returns (ReadEntryResponse) {}
+  rpc UpdateEntryRpc (UpdateEntryRequest) returns (google.protobuf.Empty) {}
+  rpc DeleteEntryRpc (DeleteEntryRequest) returns (google.protobuf.Empty) {}
+
+  // Table operations
+  rpc ReadTable (ReadTableRequest) returns (ReadTableResponse) {}
+  rpc WatchTable (WatchTableRequest) returns (stream WatchTableEvent) {}
+}
+
+service DiagnoseManagement {
+  rpc Ready (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+}
+
+
+message InitializeRequest {
+  // node_name is the cluster wide unique name for this node.
+  string node_name = 1;
+  // bind_addr is the IP on which networkdb listens.
+  string bind_addr = 2 ;
+  // bind_port is the local node's port to which we bind to for cluster communication.
+  int32 bind_port = 3;
+  // keys to be added to the Keyring of the memberlist. Key at index
+	// 0 is the primary key
+  repeated bytes keys = 4;
+}
+
+
+// ** ClusterManagement **
+enum NodeState {
+  // healthy state, everything looks good
+  HEALTHY = 0;
+  // experiencing some failure, performance is degradated but not unrecoverable
+  TRANSIENT_FAILURE = 1;
+  // criticl condition, the functionality is compromised
+  FAILED = 2;
+  // waiting for initialization
+  NOT_INITIALIZED = 3;
+}
+
+message StateClusterResponse {
+  NodeState status = 1;
+}
+
+message JoinClusterRequest {
+  repeated Peer peers = 1;
+}
+
+message PeersClusterResponse {
+  repeated Peer peers = 1;
+}
+
+// ** GroupManagement **
+
+message JoinGroupRequest {
+  string group_name = 1;
+}
+
+message LeaveGroupRequest {
+  string group_name = 1;
+}
+
+message PeerGroupRequest {
+  string group_name = 1;
+}
+
+message PeerGroupResponse {
+  repeated Peer peers = 1;
+}
+
+// ** EntryManagement **
+
+message CreateEntryRequest {
+  Table table = 1;
+  Entry entry = 2;
+}
+
+message ReadEntryRequest {
+  Table table = 1;
+  Entry entry = 2;
+}
+
+message ReadEntryResponse {
+  Table table = 1;
+  Entry entry = 2;
+}
+
+message UpdateEntryRequest {
+  Table table = 1;
+  Entry entry = 2;
+}
+
+message DeleteEntryRequest {
+  Table table = 1;
+  Entry entry = 2;
+}
+
+message ReadTableRequest {
+  Group group = 1;
+  string table_name = 2;
+}
+
+message ReadTableResponse {
+  Table table = 1;
+  repeated Entry list = 2;
+}
+
+message WatchTableRequest {
+  Group group = 1;
+  string table_name = 2;
+}
+
+message WatchTableEvent {
+  TableOperation operation = 1;
+  Table table = 2;
+  Entry entry = 3;
+}
+
+
+message Group {
+  string groupName = 1;
+}
+
+message Table {
+  Group group = 1;
+  string table_name = 2;
+}
+
+message Entry {
+  string key = 1;
+  bytes value = 2;
+}
+
+message Peer {
+  string name = 1;
+  string ip = 2;
+}
+
+enum TableOperation {
+  CREATE = 0;
+  UPDATE = 1;
+  DELETE = 2;
+}
