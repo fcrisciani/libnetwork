@@ -366,7 +366,7 @@ func (r *resolver) ServeDNS(w dns.ResponseWriter, query *dns.Msg) {
 	if query == nil || len(query.Question) == 0 {
 		return
 	}
-	name := query.Question[0].Name
+	name := strings.ToLower(query.Question[0].Name)
 
 	switch query.Question[0].Qtype {
 	case dns.TypeA:

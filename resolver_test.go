@@ -76,6 +76,85 @@ func checkDNSRRType(t *testing.T, actual, expected uint16) {
 	}
 }
 
+func TestDNSCaseInsensitivity(t *testing.T) {
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Stop()
+
+	n, err := c.NewNetwork("bridge", "dtnet1", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Delete(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	ep, err := n.CreateEndpoint("testep")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sb, err := c.NewSandbox("c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if err := sb.Delete(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// we need the endpoint only to populate ep_list for the sandbox as part of resolve_name
+	// it is not set as a target for name resolution and does not serve any other purpose
+	err = ep.Join(sb)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add service records which are used to resolve names. These are the real targets for the DNS querries
+	n.(*network).addSvcRecords("ep1", "name1", "sid1", net.ParseIP("192.168.0.1"), net.IP{}, true, "test")
+	n.(*network).addSvcRecords("ep1", "NAME2", "sid2", net.ParseIP("192.168.0.2"), net.IP{}, true, "test")
+	n.(*network).addSvcRecords("ep1", "NaMe3", "sid3", net.ParseIP("192.168.0.3"), net.IP{}, true, "test")
+
+	w := new(tstwriter)
+	// the unit tests right now will focus on non-proxyed DNS requests
+	r := NewResolver(resolverIPSandbox, false, sb.Key(), sb.(*sandbox))
+
+	// test name1's IP is resolved correctly with the default A type query
+
+	for name, ip := range map[string]string{
+		"name1": "192.168.0.1",
+		"NAME1": "192.168.0.1",
+		"name2": "192.168.0.2",
+		"nAmE2": "192.168.0.2",
+		"name3": "192.168.0.3",
+		"NAME3": "192.168.0.3",
+	} {
+		q := new(dns.Msg)
+		q.SetQuestion(name, dns.TypeA)
+		r.(*resolver).ServeDNS(w, q)
+		resp := w.GetResponse()
+		checkNonNullResponse(t, resp)
+		t.Log("Response: ", resp.String())
+		checkDNSResponseCode(t, resp, dns.RcodeSuccess)
+		checkDNSAnswersCount(t, resp, 1)
+		checkDNSRRType(t, resp.Answer[0].Header().Rrtype, dns.TypeA)
+		if answer, ok := resp.Answer[0].(*dns.A); ok {
+			if !bytes.Equal(answer.A, net.ParseIP(ip)) {
+				t.Fatalf("IP response in Answer %v does not match %s", answer.A, ip)
+			}
+		} else {
+			t.Fatal("Answer of type A not found")
+		}
+		w.ClearResponse()
+	}
+}
+
 func TestDNSIPQuery(t *testing.T) {
 	c, err := New()
 	if err != nil {

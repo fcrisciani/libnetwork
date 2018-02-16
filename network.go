@@ -1354,16 +1354,17 @@ func (n *network) addSvcRecords(eID, name, serviceID string, epIP, epIPv6 net.IP
 		c.svcRecords[n.ID()] = sr
 	}
 
+	sanitizedName := strings.ToLower(name)
 	if ipMapUpdate {
-		addIPToName(sr.ipMap, name, serviceID, epIP)
+		addIPToName(sr.ipMap, sanitizedName, serviceID, epIP)
 		if epIPv6 != nil {
-			addIPToName(sr.ipMap, name, serviceID, epIPv6)
+			addIPToName(sr.ipMap, sanitizedName, serviceID, epIPv6)
 		}
 	}
 
-	addNameToIP(sr.svcMap, name, serviceID, epIP)
+	addNameToIP(sr.svcMap, sanitizedName, serviceID, epIP)
 	if epIPv6 != nil {
-		addNameToIP(sr.svcIPv6Map, name, serviceID, epIPv6)
+		addNameToIP(sr.svcIPv6Map, sanitizedName, serviceID, epIPv6)
 	}
 }
 
@@ -1385,18 +1386,19 @@ func (n *network) deleteSvcRecords(eID, name, serviceID string, epIP net.IP, epI
 		return
 	}
 
+	sanitizedName := strings.ToLower(name)
 	if ipMapUpdate {
-		delIPToName(sr.ipMap, name, serviceID, epIP)
+		delIPToName(sr.ipMap, sanitizedName, serviceID, epIP)
 
 		if epIPv6 != nil {
-			delIPToName(sr.ipMap, name, serviceID, epIPv6)
+			delIPToName(sr.ipMap, sanitizedName, serviceID, epIPv6)
 		}
 	}
 
-	delNameToIP(sr.svcMap, name, serviceID, epIP)
+	delNameToIP(sr.svcMap, sanitizedName, serviceID, epIP)
 
 	if epIPv6 != nil {
-		delNameToIP(sr.svcIPv6Map, name, serviceID, epIPv6)
+		delNameToIP(sr.svcIPv6Map, sanitizedName, serviceID, epIPv6)
 	}
 }
 
