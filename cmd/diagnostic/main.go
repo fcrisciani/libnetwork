@@ -26,6 +26,7 @@ const (
 	networkPeers = "http://%s:%d/networkpeers?nid=%s&json"
 	dumpTable    = "http://%s:%d/gettable?nid=%s&tname=%s&json"
 	deleteEntry  = "http://%s:%d/deleteentry?nid=%s&tname=%s&key=%s&json"
+	addEntry     = "http://%s:%d/createentry?nid=%s&tname=%s&key=%s&value=%s"
 )
 
 func httpIsOk(body io.ReadCloser) {
@@ -47,6 +48,7 @@ func main() {
 	remediatePtr := flag.Bool("r", false, "perform remediation deleting orphan entries")
 	joinPtr := flag.Bool("a", false, "join/leave network")
 	verbosePtr := flag.Bool("v", false, "verbose output")
+	breakPtr := flag.Bool("b", false, "break stuff")
 
 	flag.Parse()
 
@@ -84,6 +86,57 @@ func main() {
 		if len(networkPeers) == 0 {
 			logrus.Warnf("There is no peer on network %q, check the network ID, and verify that is the non truncated version", *networkPtr)
 		}
+	}
+
+	if *breakPtr {
+		var elem libnetwork.EndpointRecord
+		elem.Name = "brokenEP"
+		elem.ServiceName = "brokenSvc"
+		elem.ServiceID = "brokenSvcID"
+		elem.VirtualIP = "192.168.1.2"
+		elem.EndpointIP = "192.168.1.5"
+		elemBytes, _ := elem.Marshal()
+		encoded := base64.StdEncoding.EncodeToString(elemBytes)
+		http.Get(fmt.Sprintf(addEntry, *ipPtr, *portPtr, *networkPtr, "endpoint_table", "83cfbd15643dc06e1b4f4e0946a4a4a7e627a9eea0ac272a339654ff6d1b1229", encoded))
+
+		elem.Name = "overlapVip"
+		elem.ServiceName = "brokenSvc1"
+		elem.ServiceID = "brokenSvcID1"
+		elem.VirtualIP = "192.168.1.2"
+		elem.EndpointIP = "192.168.1.50"
+		elemBytes, _ = elem.Marshal()
+		encoded = base64.StdEncoding.EncodeToString(elemBytes)
+		http.Get(fmt.Sprintf(addEntry, *ipPtr, *portPtr, *networkPtr, "endpoint_table", "73cfbd15643dc06e1b4f4e0946a4a4a7e627a9eea0ac272a339654ff6d1b1229", encoded))
+
+		elem.Name = "overlapTask"
+		elem.ServiceName = "brokenSvc2"
+		elem.ServiceID = "brokenSvcID2"
+		elem.VirtualIP = "192.168.1.200"
+		elem.EndpointIP = "192.168.1.5"
+		elemBytes, _ = elem.Marshal()
+		encoded = base64.StdEncoding.EncodeToString(elemBytes)
+		http.Get(fmt.Sprintf(addEntry, *ipPtr, *portPtr, *networkPtr, "endpoint_table", "83cfbd15643dc06e1b5f4e0946a4a4a7e627a9eea0ac272a339654ff6d1b1229", encoded))
+
+		elem.Name = "overlapTask"
+		elem.ServiceName = "brokenSvc2"
+		elem.ServiceID = "brokenSvcID2"
+		elem.VirtualIP = "192.168.1.200"
+		elem.EndpointIP = "192.168.1.5"
+		elemBytes, _ = elem.Marshal()
+		encoded = base64.StdEncoding.EncodeToString(elemBytes)
+		http.Get(fmt.Sprintf(addEntry, *ipPtr, *portPtr, *networkPtr, "endpoint_table", "12cfbd15643dc06e1b4f4e0946a4a4a7e627a9eea0ac272a339654ff6d1b1229", encoded))
+
+		elem.Name = "overlapTaskVip"
+		elem.ServiceName = "brokenSvc5"
+		elem.ServiceID = "brokenSvcID2"
+		elem.VirtualIP = "192.168.1.199"
+		elem.EndpointIP = "192.168.1.200"
+		elemBytes, _ = elem.Marshal()
+		encoded = base64.StdEncoding.EncodeToString(elemBytes)
+		http.Get(fmt.Sprintf(addEntry, *ipPtr, *portPtr, *networkPtr, "endpoint_table", "12cfbd15643dc06e1b4f4e0746a4a4a7e627a9eea0ac272a339654ff6d1b1229", encoded))
+
+		// logrus.Warnf("data: %s", fmt.Sprintf(addEntry, *ipPtr, *portPtr, *networkPtr, "endpoint_table", "83cfbd15643dc06e1b4f4e0946a4a4a7e627a9eea0ac272a339654ff6d1b1229", encoded))
+		return
 	}
 
 	switch *tablePtr {
@@ -168,11 +221,13 @@ func fetchTable(ip string, port int, network, tableName string, clusterPeers, ne
 			logrus.WithError(err).Errorf("Failed decoding entry")
 			continue
 		}
+
 		switch tableName {
 		case "endpoint_table":
 			var elem libnetwork.EndpointRecord
 			elem.Unmarshal(decoded)
 			logrus.Debugf("key:%s value:%+v owner:%s", v.Key, elem, v.Owner)
+
 		case "overlay_peer_table":
 			var elem overlay.PeerRecord
 			elem.Unmarshal(decoded)
@@ -186,6 +241,7 @@ func fetchTable(ip string, port int, network, tableName string, clusterPeers, ne
 		if _, ok := clusterPeers[v.Owner]; !ok {
 			logrus.Warnf("The element with key:%s does not belong to any node on this cluster", v.Key)
 		}
+
 	}
 
 	if len(orphanKeys) > 0 && remediate {
