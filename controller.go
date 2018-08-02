@@ -730,6 +730,10 @@ func (c *controller) NewNetwork(networkType, name string, id string, options ...
 	var (
 		cap *driverapi.Capability
 		err error
+		addStart time.Time
+		addTime time.Duration
+		ipamStart time.Time
+		ipamTime time.Duration
 	)
 
 	// Reset network types, force local scope and skip allocation and
@@ -795,7 +799,9 @@ func (c *controller) NewNetwork(networkType, name string, id string, options ...
 		}()
 	}
 
+	ipamStart = time.Now()
 	err = network.ipamAllocate()
+	ipamTime = time.Now().Sub(ipamStart)
 	if err != nil {
 		return nil, err
 	}
@@ -804,11 +810,15 @@ func (c *controller) NewNetwork(networkType, name string, id string, options ...
 			network.ipamRelease()
 		}
 	}()
+	logrus.Warnf("ipamAllocate(%s) took %s", network.name, ipamTime.String())
 
+	addStart = time.Now()
 	err = c.addNetwork(network)
+	addTime = time.Now().Sub(addStart)
 	if err != nil {
 		return nil, err
 	}
+	logrus.Warnf("addNetwork(%s) took %s", network.name, addTime.String())
 	defer func() {
 		if err != nil {
 			if e := network.deleteNetwork(); e != nil {

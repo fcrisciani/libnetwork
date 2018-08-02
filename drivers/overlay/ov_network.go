@@ -134,6 +134,7 @@ func (d *driver) NetworkFree(id string) error {
 }
 
 func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo driverapi.NetworkInfo, ipV4Data, ipV6Data []driverapi.IPAMData) error {
+	logrus.Infof("overlay: CreateNetwork(%s)", id)
 	if id == "" {
 		return fmt.Errorf("invalid network id")
 	}
@@ -222,6 +223,7 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 		}
 	}
 
+	logrus.Infof("overlay: addNetwork(%s)", n.id)
 	d.addNetwork(n)
 	return nil
 }
