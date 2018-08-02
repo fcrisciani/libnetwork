@@ -4,9 +4,21 @@ import (
 	"encoding/json"
 	"net"
 
+	"github.com/Sirupsen/logrus"
+	metrics "github.com/docker/go-metrics"
 	"github.com/hashicorp/memberlist"
-	"github.com/sirupsen/logrus"
 )
+
+var (
+	ns = metrics.NewNamespace("libnetwork", "networkdb", nil)
+
+	nodesMetric metrics.Gauge
+)
+
+func init() {
+	nodesMetric = ns.NewGauge("nodes", "The number of nodes in the gossip list", metrics.Total)
+	metrics.Register(ns)
+}
 
 type eventDelegate struct {
 	nDB *NetworkDB
@@ -38,6 +50,8 @@ func (e *eventDelegate) NotifyJoin(mn *memberlist.Node) {
 	// failed or shutdown one
 	e.nDB.purgeReincarnation(mn)
 	e.nDB.nodes[mn.Name] = &node{Node: *mn}
+	nodesMetric.Set(float64(len(e.nDB.nodes)))
+	e.nDB.Unlock()
 	logrus.Infof("Node %s/%s, added to nodes list", mn.Name, mn.Addr)
 }
 
@@ -65,6 +79,7 @@ func (e *eventDelegate) NotifyLeave(mn *memberlist.Node) {
 			logrus.Infof("Node %s/%s, added to failed nodes list", mn.Name, mn.Addr)
 		}
 	}
+	nodesMetric.Set(float64(len(e.nDB.nodes)))
 }
 
 func (e *eventDelegate) NotifyUpdate(n *memberlist.Node) {

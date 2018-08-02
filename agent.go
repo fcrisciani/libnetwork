@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/pkg/stringid"
@@ -518,7 +519,11 @@ func (n *network) joinCluster() error {
 		return nil
 	}
 
-	return agent.networkDB.JoinNetwork(n.ID())
+	t0 := time.Now()
+	err := agent.networkDB.JoinNetwork(n.ID())
+	t1 := time.Now()
+	logrus.Warnf("JoinNetwork(%s) took %s", n.id, t1.Sub(t0).String())
+	return err
 }
 
 func (n *network) leaveCluster() error {

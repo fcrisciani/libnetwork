@@ -622,6 +622,7 @@ func (nDB *NetworkDB) JoinNetwork(nid string) error {
 	n = nodeNetworks[nid]
 	nDB.Unlock()
 
+	logrus.Warnf("JoinNetwork(%d): sendNetworkEvent...", nid)
 	if err := nDB.sendNetworkEvent(nid, NetworkEventTypeJoin, ltime); err != nil {
 		return fmt.Errorf("failed to send leave network event for %s: %v", nid, err)
 	}
@@ -630,6 +631,7 @@ func (nDB *NetworkDB) JoinNetwork(nid string) error {
 	if _, err := nDB.bulkSync(networkNodes, true); err != nil {
 		logrus.Errorf("Error bulk syncing while joining network %s: %v", nid, err)
 	}
+	logrus.Debugf("%v(%v): joined network %s - sync done", nDB.config.Hostname, nDB.config.NodeID, nid)
 
 	// Mark the network as being synced
 	// note this is a best effort, we are not checking the result of the bulk sync

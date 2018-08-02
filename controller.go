@@ -851,7 +851,10 @@ addToStore:
 		return network, nil
 	}
 
+	joinStart := time.Now()
 	joinCluster(network)
+	joinTime := time.Now().Sub(joinStart)
+	logrus.Warnf("join(%s) took %s", network.name, joinTime.String())
 	if !c.isDistributedControl() {
 		c.Lock()
 		arrangeIngressFilterRule()
@@ -862,6 +865,7 @@ addToStore:
 	arrangeUserFilterRule()
 	c.Unlock()
 
+	logrus.Warnf("NewNetwork(%s) done", network.name)
 	return network, nil
 }
 
