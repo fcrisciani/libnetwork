@@ -276,6 +276,7 @@ func (nDB *NetworkDB) reapDeadNode() {
 			delete(nodeMap, id)
 		}
 	}
+	nDB.updateNodesMetric()
 }
 
 // rejoinClusterBootStrap is called periodically to check if all bootStrap nodes are active in the cluster,

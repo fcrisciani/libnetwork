@@ -12,16 +12,29 @@ import (
 var (
 	ns = metrics.NewNamespace("libnetwork", "networkdb", nil)
 
-	nodesMetric metrics.Gauge
+	activeMetric metrics.Gauge
+	failedMetric metrics.Gauge
+	leftMetric   metrics.Gauge
 )
 
 func init() {
-	nodesMetric = ns.NewGauge("nodes", "The number of nodes in the gossip list", metrics.Total)
+	nodes := ns.NewLabeledGauge("nodes", "The number of nodes in the gossip list", metrics.Total, "state")
 	metrics.Register(ns)
+
+	activeMetric = nodes.WithValues("active")
+	failedMetric = nodes.WithValues("failed")
+	leftMetric = nodes.WithValues("left")
 }
 
 type eventDelegate struct {
 	nDB *NetworkDB
+}
+
+// Called with nDB lock held
+func (nDB *NetworkDB) updateNodesMetric() {
+	activeMetric.Set(float64(len(nDB.nodes)))
+	failedMetric.Set(float64(len(nDB.failedNodes)))
+	leftMetric.Set(float64(len(nDB.leftNodes)))
 }
 
 func (e *eventDelegate) broadcastNodeEvent(addr net.IP, op opType) {
@@ -50,7 +63,7 @@ func (e *eventDelegate) NotifyJoin(mn *memberlist.Node) {
 	// failed or shutdown one
 	e.nDB.purgeReincarnation(mn)
 	e.nDB.nodes[mn.Name] = &node{Node: *mn}
-	nodesMetric.Set(float64(len(e.nDB.nodes)))
+	e.nDB.updateNodesMetric()
 	e.nDB.Unlock()
 	logrus.Infof("Node %s/%s, added to nodes list", mn.Name, mn.Addr)
 }
@@ -79,7 +92,6 @@ func (e *eventDelegate) NotifyLeave(mn *memberlist.Node) {
 			logrus.Infof("Node %s/%s, added to failed nodes list", mn.Name, mn.Addr)
 		}
 	}
-	nodesMetric.Set(float64(len(e.nDB.nodes)))
 }
 
 func (e *eventDelegate) NotifyUpdate(n *memberlist.Node) {

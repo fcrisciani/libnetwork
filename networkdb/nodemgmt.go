@@ -88,6 +88,8 @@ func (nDB *NetworkDB) changeNodeState(nodeName string, newState nodeState) (bool
 		nDB.deleteNodeTableEntries(n.Name)
 	}
 
+	nDB.updateNodesMetric()
+
 	return true, nil
 }
 
