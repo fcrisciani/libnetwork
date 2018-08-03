@@ -61,6 +61,7 @@ import (
 	"github.com/docker/libnetwork/cluster"
 	"github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/datastore"
+	"github.com/docker/libnetwork/diagnostic"
 	"github.com/docker/libnetwork/discoverapi"
 	"github.com/docker/libnetwork/driverapi"
 	"github.com/docker/libnetwork/drvregistry"
@@ -167,6 +168,7 @@ type controller struct {
 	agentStopDone          chan struct{}
 	keys                   []*types.EncryptionKey
 	clusterConfigAvailable bool
+	DiagnoseServer         *diagnostic.Server
 	sync.Mutex
 }
 
@@ -185,7 +187,12 @@ func New(cfgOptions ...config.Option) (NetworkController, error) {
 		serviceBindings: make(map[serviceKey]*service),
 		agentInitDone:   make(chan struct{}),
 		networkLocker:   locker.New(),
+		DiagnoseServer:  diagnostic.New(),
 	}
+	c.DiagnoseServer.Init()
+
+	// keep it on a random port
+	c.DiagnoseServer.EnableDiagnostic("127.0.0.1", 12345)
 
 	if err := c.initStores(); err != nil {
 		return nil, err
@@ -728,12 +735,12 @@ func (c *controller) NewNetwork(networkType, name string, id string, options ...
 	}
 
 	var (
-		cap *driverapi.Capability
-		err error
-		addStart time.Time
-		addTime time.Duration
+		cap       *driverapi.Capability
+		err       error
+		addStart  time.Time
+		addTime   time.Duration
 		ipamStart time.Time
-		ipamTime time.Duration
+		ipamTime  time.Duration
 	)
 
 	// Reset network types, force local scope and skip allocation and
