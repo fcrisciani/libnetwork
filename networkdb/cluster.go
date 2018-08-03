@@ -18,17 +18,15 @@ import (
 )
 
 const (
-	// The garbage collection logic for entries leverage the presence of the network.
-	// For this reason the expiration time of the network is put slightly higher than the entry expiration so that
-	// there is at least 5 extra cycle to make sure that all the entries are properly deleted before deleting the network.
-	reapEntryInterval     = 30 * time.Minute
-	reapNetworkInterval   = reapEntryInterval + 5*reapPeriod
 	reapPeriod            = 5 * time.Second
+	rejoinClusterDuration = 10 * time.Second
+	rejoinInterval        = 60 * time.Second
 	retryInterval         = 1 * time.Second
 	nodeReapInterval      = 24 * time.Hour
 	nodeReapPeriod        = 2 * time.Hour
-	rejoinClusterDuration = 10 * time.Second
-	rejoinInterval        = 60 * time.Second
+	// considering a cluster with > 20 nodes and a drain speed of 100 msg/s
+	// the following is roughly 1 minute
+	maxQueueLenBroadcastOnSync = 500
 )
 
 type logWriter struct{}
@@ -57,7 +55,7 @@ func (l *logWriter) Write(p []byte) (int, error) {
 
 // SetKey adds a new key to the key ring
 func (nDB *NetworkDB) SetKey(key []byte) {
-	logrus.Debugf("Adding key %s", hex.EncodeToString(key)[0:5])
+	logrus.Debugf("Adding key %.5s", hex.EncodeToString(key))
 	nDB.Lock()
 	defer nDB.Unlock()
 	for _, dbKey := range nDB.config.Keys {
@@ -74,7 +72,7 @@ func (nDB *NetworkDB) SetKey(key []byte) {
 // SetPrimaryKey sets the given key as the primary key. This should have
 // been added apriori through SetKey
 func (nDB *NetworkDB) SetPrimaryKey(key []byte) {
-	logrus.Debugf("Primary Key %s", hex.EncodeToString(key)[0:5])
+	logrus.Debugf("Primary Key %.5s", hex.EncodeToString(key))
 	nDB.RLock()
 	defer nDB.RUnlock()
 	for _, dbKey := range nDB.config.Keys {
@@ -90,7 +88,7 @@ func (nDB *NetworkDB) SetPrimaryKey(key []byte) {
 // RemoveKey removes a key from the key ring. The key being removed
 // can't be the primary key
 func (nDB *NetworkDB) RemoveKey(key []byte) {
-	logrus.Debugf("Remove Key %s", hex.EncodeToString(key)[0:5])
+	logrus.Debugf("Remove Key %.5s", hex.EncodeToString(key))
 	nDB.Lock()
 	defer nDB.Unlock()
 	for i, dbKey := range nDB.config.Keys {
@@ -109,7 +107,7 @@ func (nDB *NetworkDB) clusterInit() error {
 	nDB.lastHealthTimestamp = nDB.lastStatsTimestamp
 
 	config := memberlist.DefaultLANConfig()
-	config.Name = nDB.config.NodeName
+	config.Name = nDB.config.NodeID
 	config.BindAddr = nDB.config.BindAddr
 	config.AdvertiseAddr = nDB.config.AdvertiseAddr
 	config.UDPBufferSize = nDB.config.PacketBufferSize
@@ -128,7 +126,7 @@ func (nDB *NetworkDB) clusterInit() error {
 	var err error
 	if len(nDB.config.Keys) > 0 {
 		for i, key := range nDB.config.Keys {
-			logrus.Debugf("Encryption key %d: %s", i+1, hex.EncodeToString(key)[0:5])
+			logrus.Debugf("Encryption key %d: %.5s", i+1, hex.EncodeToString(key))
 		}
 		nDB.keyring, err = memberlist.NewKeyring(nDB.config.Keys, nDB.config.Keys[0])
 		if err != nil {
@@ -245,7 +243,7 @@ func (nDB *NetworkDB) clusterLeave() error {
 }
 
 func (nDB *NetworkDB) triggerFunc(stagger time.Duration, C <-chan time.Time, f func()) {
-	// Use a random stagger to avoid syncronizing
+	// Use a random stagger to avoid synchronizing
 	randStagger := time.Duration(uint64(rnd.Int63()) % uint64(stagger))
 	select {
 	case <-time.After(randStagger):
@@ -265,13 +263,18 @@ func (nDB *NetworkDB) triggerFunc(stagger time.Duration, C <-chan time.Time, f f
 func (nDB *NetworkDB) reapDeadNode() {
 	nDB.Lock()
 	defer nDB.Unlock()
-	for id, n := range nDB.failedNodes {
-		if n.reapTime > 0 {
-			n.reapTime -= nodeReapPeriod
-			continue
+	for _, nodeMap := range []map[string]*node{
+		nDB.failedNodes,
+		nDB.leftNodes,
+	} {
+		for id, n := range nodeMap {
+			if n.reapTime > nodeReapPeriod {
+				n.reapTime -= nodeReapPeriod
+				continue
+			}
+			logrus.Debugf("Garbage collect node %v", n.Name)
+			delete(nodeMap, id)
 		}
-		logrus.Debugf("Removing failed node %v from gossip cluster", n.Name)
-		delete(nDB.failedNodes, id)
 	}
 }
 
@@ -285,18 +288,35 @@ func (nDB *NetworkDB) rejoinClusterBootStrap() {
 		return
 	}
 
+	myself, _ := nDB.nodes[nDB.config.NodeID]
 	bootStrapIPs := make([]string, 0, len(nDB.bootStrapIP))
 	for _, bootIP := range nDB.bootStrapIP {
-		for _, node := range nDB.nodes {
-			if node.Addr.Equal(bootIP) {
-				// One of the bootstrap nodes is part of the cluster, return
-				nDB.RUnlock()
-				return
-			}
+		// botostrap IPs are usually IP:port from the Join
+		var bootstrapIP net.IP
+		ipStr, _, err := net.SplitHostPort(bootIP)
+		if err != nil {
+			// try to parse it as an IP with port
+			// Note this seems to be the case for swarm that do not specify any port
+			ipStr = bootIP
 		}
-		bootStrapIPs = append(bootStrapIPs, bootIP.String())
+		bootstrapIP = net.ParseIP(ipStr)
+		if bootstrapIP != nil {
+			for _, node := range nDB.nodes {
+				if node.Addr.Equal(bootstrapIP) && !node.Addr.Equal(myself.Addr) {
+					// One of the bootstrap nodes (and not myself) is part of the cluster, return
+					nDB.RUnlock()
+					return
+				}
+			}
+			bootStrapIPs = append(bootStrapIPs, bootIP)
+		}
 	}
 	nDB.RUnlock()
+	if len(bootStrapIPs) == 0 {
+		// this will also avoid to call the Join with an empty list erasing the current bootstrap ip list
+		logrus.Debug("rejoinClusterBootStrap did not find any valid IP")
+		return
+	}
 	// None of the bootStrap nodes are in the cluster, call memberlist join
 	logrus.Debugf("rejoinClusterBootStrap, calling cluster join with bootStrap %v", bootStrapIPs)
 	ctx, cancel := context.WithTimeout(nDB.ctx, rejoinClusterDuration)
@@ -363,7 +383,7 @@ func (nDB *NetworkDB) reapTableEntries() {
 	var nodeNetworks []string
 	// This is best effort, if the list of network changes will be picked up in the next cycle
 	nDB.RLock()
-	for nid := range nDB.networks[nDB.config.NodeName] {
+	for nid := range nDB.networks[nDB.config.NodeID] {
 		nodeNetworks = append(nodeNetworks, nid)
 	}
 	nDB.RUnlock()
@@ -410,10 +430,9 @@ func (nDB *NetworkDB) reapTableEntries() {
 func (nDB *NetworkDB) gossip() {
 	networkNodes := make(map[string][]string)
 	nDB.RLock()
-	thisNodeNetworks := nDB.networks[nDB.config.NodeName]
+	thisNodeNetworks := nDB.networks[nDB.config.NodeID]
 	for nid := range thisNodeNetworks {
 		networkNodes[nid] = nDB.networkNodes[nid]
-
 	}
 	printStats := time.Since(nDB.lastStatsTimestamp) >= nDB.config.StatsPrintPeriod
 	printHealth := time.Since(nDB.lastHealthTimestamp) >= nDB.config.HealthPrintPeriod
@@ -422,7 +441,7 @@ func (nDB *NetworkDB) gossip() {
 	if printHealth {
 		healthScore := nDB.memberlist.GetHealthScore()
 		if healthScore != 0 {
-			logrus.Warnf("NetworkDB stats - healthscore:%d (connectivity issues)", healthScore)
+			logrus.Warnf("NetworkDB stats %v(%v) - healthscore:%d (connectivity issues)", nDB.config.Hostname, nDB.config.NodeID, healthScore)
 		}
 		nDB.lastHealthTimestamp = time.Now()
 	}
@@ -453,7 +472,8 @@ func (nDB *NetworkDB) gossip() {
 		// Collect stats and print the queue info, note this code is here also to have a view of the queues empty
 		network.qMessagesSent += len(msgs)
 		if printStats {
-			logrus.Infof("NetworkDB stats - netID:%s leaving:%t netPeers:%d entries:%d Queue qLen:%d netMsg/s:%d",
+			logrus.Infof("NetworkDB stats %v(%v) - netID:%s leaving:%t netPeers:%d entries:%d Queue qLen:%d netMsg/s:%d",
+				nDB.config.Hostname, nDB.config.NodeID,
 				nid, network.leaving, broadcastQ.NumNodes(), network.entriesNumber, broadcastQ.NumQueued(),
 				network.qMessagesSent/int((nDB.config.StatsPrintPeriod/time.Second)))
 			network.qMessagesSent = 0
@@ -490,7 +510,7 @@ func (nDB *NetworkDB) gossip() {
 func (nDB *NetworkDB) bulkSyncTables() {
 	var networks []string
 	nDB.RLock()
-	for nid, network := range nDB.networks[nDB.config.NodeName] {
+	for nid, network := range nDB.networks[nDB.config.NodeID] {
 		if network.leaving {
 			continue
 		}
@@ -555,28 +575,33 @@ func (nDB *NetworkDB) bulkSync(nodes []string, all bool) ([]string, error) {
 
 	var err error
 	var networks []string
+	var success bool
 	for _, node := range nodes {
-		if node == nDB.config.NodeName {
+		if node == nDB.config.NodeID {
 			continue
 		}
-		logrus.Debugf("%s: Initiating bulk sync with node %v", nDB.config.NodeName, node)
+		logrus.Debugf("%v(%v): Initiating bulk sync with node %v", nDB.config.Hostname, nDB.config.NodeID, node)
 		networks = nDB.findCommonNetworks(node)
 		err = nDB.bulkSyncNode(networks, node, true)
-		// if its periodic bulksync stop after the first successful sync
-		if !all && err == nil {
-			break
-		}
 		if err != nil {
 			err = fmt.Errorf("bulk sync to node %s failed: %v", node, err)
 			logrus.Warn(err.Error())
+		} else {
+			// bulk sync succeeded
+			success = true
+			// if its periodic bulksync stop after the first successful sync
+			if !all {
+				break
+			}
 		}
 	}
 
-	if err != nil {
-		return nil, err
+	if success {
+		// if at least one node sync succeeded
+		return networks, nil
 	}
 
-	return networks, nil
+	return nil, err
 }
 
 // Bulk sync all the table entries belonging to a set of networks to a
@@ -590,7 +615,8 @@ func (nDB *NetworkDB) bulkSyncNode(networks []string, node string, unsolicited b
 		unsolMsg = "unsolicited"
 	}
 
-	logrus.Debugf("%s: Initiating %s bulk sync for networks %v with node %s", nDB.config.NodeName, unsolMsg, networks, node)
+	logrus.Debugf("%v(%v): Initiating %s bulk sync for networks %v with node %s",
+		nDB.config.Hostname, nDB.config.NodeID, unsolMsg, networks, node)
 
 	nDB.RLock()
 	mnode := nDB.nodes[node]
@@ -642,7 +668,7 @@ func (nDB *NetworkDB) bulkSyncNode(networks []string, node string, unsolicited b
 	bsm := BulkSyncMessage{
 		LTime:       nDB.tableClock.Time(),
 		Unsolicited: unsolicited,
-		NodeName:    nDB.config.NodeName,
+		NodeName:    nDB.config.NodeID,
 		Networks:    networks,
 		Payload:     compound,
 	}
@@ -674,7 +700,7 @@ func (nDB *NetworkDB) bulkSyncNode(networks []string, node string, unsolicited b
 		case <-t.C:
 			logrus.Errorf("Bulk sync to node %s timed out", node)
 		case <-ch:
-			logrus.Debugf("%s: Bulk sync to node %s took %s", nDB.config.NodeName, node, time.Since(startTime))
+			logrus.Debugf("%v(%v): Bulk sync to node %s took %s", nDB.config.Hostname, nDB.config.NodeID, node, time.Since(startTime))
 		}
 		t.Stop()
 	}
@@ -711,7 +737,7 @@ OUTER:
 		idx := randomOffset(n)
 		node := nodes[idx]
 
-		if node == nDB.config.NodeName {
+		if node == nDB.config.NodeID {
 			continue
 		}
 
