@@ -700,8 +700,10 @@ func (nDB *NetworkDB) bulkSyncNode(networks []string, node string, unsolicited b
 		select {
 		case <-t.C:
 			logrus.Errorf("Bulk sync to node %s timed out", node)
+			bulkSyncReplyFailures.Inc(1)
 		case <-ch:
 			logrus.Debugf("%v(%v): Bulk sync to node %s took %s", nDB.config.Hostname, nDB.config.NodeID, node, time.Since(startTime))
+			bulkSyncReplySuccess.UpdateSince(startTime)
 		}
 		t.Stop()
 	}

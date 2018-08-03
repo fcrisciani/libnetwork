@@ -15,10 +15,17 @@ var (
 	activeMetric metrics.Gauge
 	failedMetric metrics.Gauge
 	leftMetric   metrics.Gauge
+
+	bulkSyncReplyFailures metrics.Counter
+	bulkSyncReplySuccess metrics.Timer
 )
 
 func init() {
 	nodes := ns.NewLabeledGauge("nodes", "The number of nodes in the gossip list", metrics.Total, "state")
+
+	bulkSyncReplyFailures = ns.NewCounter("bulksync_reply_failures", "Number of timeouts waiting for a bulk sync reply")
+	bulkSyncReplySuccess = ns.NewTimer("bulksync_reply_time", "Time spent waiting for a (successful) bulk sync reply")
+
 	metrics.Register(ns)
 
 	activeMetric = nodes.WithValues("active")
