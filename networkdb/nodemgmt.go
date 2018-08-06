@@ -94,29 +94,43 @@ func (nDB *NetworkDB) changeNodeState(nodeName string, newState nodeState) (bool
 }
 
 func (nDB *NetworkDB) purgeReincarnation(mn *memberlist.Node) bool {
+	var purgedNode string
 	for name, node := range nDB.nodes {
 		if node.Addr.Equal(mn.Addr) && node.Port == mn.Port && mn.Name != name {
 			logrus.Infof("Node %s/%s, is the new incarnation of the active node %s/%s", mn.Name, mn.Addr, name, node.Addr)
 			nDB.changeNodeState(name, nodeLeftState)
-			return true
+			purgedNode = name
+			break
 		}
 	}
 
-	for name, node := range nDB.failedNodes {
-		if node.Addr.Equal(mn.Addr) && node.Port == mn.Port && mn.Name != name {
-			logrus.Infof("Node %s/%s, is the new incarnation of the failed node %s/%s", mn.Name, mn.Addr, name, node.Addr)
-			nDB.changeNodeState(name, nodeLeftState)
-			return true
+	if purgedNode == "" {
+		for name, node := range nDB.failedNodes {
+			if node.Addr.Equal(mn.Addr) && node.Port == mn.Port && mn.Name != name {
+				logrus.Infof("Node %s/%s, is the new incarnation of the failed node %s/%s", mn.Name, mn.Addr, name, node.Addr)
+				nDB.changeNodeState(name, nodeLeftState)
+				purgedNode = name
+				break
+			}
 		}
 	}
 
-	for name, node := range nDB.leftNodes {
-		if node.Addr.Equal(mn.Addr) && node.Port == mn.Port && mn.Name != name {
-			logrus.Infof("Node %s/%s, is the new incarnation of the shutdown node %s/%s", mn.Name, mn.Addr, name, node.Addr)
-			nDB.changeNodeState(name, nodeLeftState)
-			return true
+	if purgedNode == "" {
+		for name, node := range nDB.leftNodes {
+			if node.Addr.Equal(mn.Addr) && node.Port == mn.Port && mn.Name != name {
+				logrus.Infof("Node %s/%s, is the new incarnation of the shutdown node %s/%s", mn.Name, mn.Addr, name, node.Addr)
+				nDB.changeNodeState(name, nodeLeftState)
+				purgedNode = name
+				break
+			}
 		}
 	}
 
-	return false
+	if purgedNode != "" {
+		// the node got already moved to the left state, clean ip up now
+		delete(nDB.leftNodes, purgedNode)
+		nDB.updateNodesMetric()
+	}
+
+	return purgedNode != ""
 }
