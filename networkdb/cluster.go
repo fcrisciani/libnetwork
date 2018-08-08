@@ -3,17 +3,17 @@ package networkdb
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log"
-	"math/big"
+	"math/rand"
 	rnd "math/rand"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/libnetwork/internal/caller"
 	"github.com/hashicorp/memberlist"
 )
 
@@ -27,9 +27,36 @@ const (
 	// considering a cluster with > 20 nodes and a drain speed of 100 msg/s
 	// the following is roughly 1 minute
 	maxQueueLenBroadcastOnSync = 500
+	bulkSyncMaxWait            = 30 * time.Second
 )
 
 type logWriter struct{}
+
+type errSyncPending struct {
+	node string
+}
+
+func (e *errSyncPending) Error() string {
+	return fmt.Sprintf("Sync already in progress with node %v", e.node)
+}
+
+type errNodeNotFound struct {
+	node string
+}
+
+func (e *errNodeNotFound) Error() string {
+	return fmt.Sprintf("Node %v not anymore available", e.node)
+}
+
+type errBulkFailedTimeout struct {
+	node    string
+	network string
+	timeout time.Duration
+}
+
+func (e *errBulkFailedTimeout) Error() string {
+	return fmt.Sprintf("Bulk sync with Node %v for network %v did not finish in %s", e.node, e.network, e.timeout)
+}
 
 func (l *logWriter) Write(p []byte) (int, error) {
 	str := string(p)
@@ -103,6 +130,9 @@ func (nDB *NetworkDB) RemoveKey(key []byte) {
 }
 
 func (nDB *NetworkDB) clusterInit() error {
+	// initlize the seed of the pseudo-random generator
+	rand.Seed(time.Now().Unix())
+
 	nDB.lastStatsTimestamp = time.Now()
 	nDB.lastHealthTimestamp = nDB.lastStatsTimestamp
 
@@ -169,7 +199,7 @@ func (nDB *NetworkDB) clusterInit() error {
 	}{
 		{reapPeriod, nDB.reapState},
 		{config.GossipInterval, nDB.gossip},
-		{config.PushPullInterval, nDB.bulkSyncTables},
+		{config.PushPullInterval, nDB.bulkSyncNetworks},
 		{retryInterval, nDB.reconnectNode},
 		{nodeReapPeriod, nDB.reapDeadNode},
 		{rejoinInterval, nDB.rejoinClusterBootStrap},
@@ -350,7 +380,10 @@ func (nDB *NetworkDB) reconnectNode() {
 	}
 
 	logrus.Debugf("Initiating bulk sync with node %s after reconnect", node.Name)
-	nDB.bulkSync([]string{node.Name}, true)
+	networks := nDB.findCommonNetworks(node.Name)
+	for _, nid := range networks {
+		nDB.bulkSyncNode(nid, node.Name, true)
+	}
 }
 
 // For timing the entry deletion in the repaer APIs that doesn't use monotonic clock
@@ -508,159 +541,154 @@ func (nDB *NetworkDB) gossip() {
 	}
 }
 
-func (nDB *NetworkDB) bulkSyncTables() {
-	var networks []string
+func (nDB *NetworkDB) bulkSyncNetworks() {
+	id := time.Now().Unix()
+	logrus.Infof("bulkSyncNetworks [%v] START", id)
 	nDB.RLock()
+	networks := make([]string, 0, len(nDB.networks[nDB.config.NodeID]))
 	for nid, network := range nDB.networks[nDB.config.NodeID] {
-		if network.leaving {
+		// if the network is being abandoned or the network still did not go through
+		// the first initialization sync, skip the bulk sync
+		if network.leaving || !network.inSync {
+
 			continue
 		}
 		networks = append(networks, nid)
 	}
 	nDB.RUnlock()
 
-	for {
-		if len(networks) == 0 {
-			break
-		}
-
-		nid := networks[0]
-		networks = networks[1:]
-
-		nDB.RLock()
-		nodes := nDB.networkNodes[nid]
-		nDB.RUnlock()
-
-		// No peer nodes on this network. Move on.
-		if len(nodes) == 0 {
-			continue
-		}
-
-		completed, err := nDB.bulkSync(nodes, false)
+	logrus.Infof("bulkSyncNetworks [%v] going to sync %v, READY", id, networks)
+	for _, nid := range networks {
+		err := nDB.bulkSyncNetwork(nid, false)
 		if err != nil {
 			logrus.Errorf("periodic bulk sync failure for network %s: %v", nid, err)
 			continue
 		}
-
-		// Remove all the networks for which we have
-		// successfully completed bulk sync in this iteration.
-		updatedNetworks := make([]string, 0, len(networks))
-		for _, nid := range networks {
-			var found bool
-			for _, completedNid := range completed {
-				if nid == completedNid {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				updatedNetworks = append(updatedNetworks, nid)
-			}
-		}
-
-		networks = updatedNetworks
+		// give some time between each network sync to not process all of them in bulk
+		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond)
 	}
+	logrus.Infof("bulkSyncNetworks [%v] going to sync %v, DONE", id, networks)
 }
 
-func (nDB *NetworkDB) bulkSync(nodes []string, all bool) ([]string, error) {
-	if !all {
-		// Get 2 random nodes. 2nd node will be tried if the bulk sync to
-		// 1st node fails.
-		nodes = nDB.mRandomNodes(2, nodes)
-	}
-
-	if len(nodes) == 0 {
-		return nil, nil
-	}
-
-	var err error
-	var networks []string
+// bulkSyncNetwork synchronize a network state with one or more nodes
+func (nDB *NetworkDB) bulkSyncNetwork(netID string, all bool) (err error) {
+	nDB.Lock()
+	nodes := nDB.networkNodes[netID]
+	nDB.Unlock()
+	// Get 3 random nodes.
+	// If this is the first bulkSync, will sync with all the node else
+	// 2nd and 3rd are for backup if the first fails
+	nodes = nDB.mRandomNodes(3, nodes)
 	var success bool
 	for _, node := range nodes {
-		if node == nDB.config.NodeID {
+		logrus.Debugf("%v(%v): Initiating bulk sync for network %v with node %v", nDB.config.Hostname, nDB.config.NodeID, netID, node)
+		err = nDB.bulkSyncNode(netID, node, true)
+		if err != nil {
+			err = fmt.Errorf("bulk sync for network %v with node %s failed: %v", netID, node, err)
+			logrus.Warn(err.Error())
+			// try the next node
 			continue
 		}
-		logrus.Debugf("%v(%v): Initiating bulk sync with node %v", nDB.config.Hostname, nDB.config.NodeID, node)
-		networks = nDB.findCommonNetworks(node)
-		err = nDB.bulkSyncNode(networks, node, true)
-		if err != nil {
-			err = fmt.Errorf("bulk sync to node %s failed: %v", node, err)
-			logrus.Warn(err.Error())
-		} else {
-			// bulk sync succeeded
-			success = true
-			// if its periodic bulksync stop after the first successful sync
-			if !all {
-				break
-			}
+		if !all {
+			break
 		}
+		success = true
 	}
-
+	// if at least one node sync succeed, return nil
 	if success {
-		// if at least one node sync succeeded
-		return networks, nil
+		return nil
 	}
-
-	return nil, err
+	return
 }
 
-// Bulk sync all the table entries belonging to a set of networks to a
-// single peer node. It can be unsolicited or can be in response to an
-// unsolicited bulk sync
-func (nDB *NetworkDB) bulkSyncNode(networks []string, node string, unsolicited bool) error {
-	var msgs [][]byte
+// Bulk sync all the table entries belonging to a network to a single peer node.
+// When unsolicited means that this node is requesting the other side to respond with a bulk sync
+// When is not unsolicited means that this node is replying to a request coming from another node
+// Read unsolicted as "do I want a reply?"
+func (nDB *NetworkDB) bulkSyncNode(network string, node string, unsolicited bool) error {
+	logrus.Infof("[%v] Starting bulkSyncNode for %v with node %v unsolicited:%v", caller.Name(2), network, node, unsolicited)
+	nDB.Lock()
+	mnode := nDB.nodes[node]
+	// check if the node exists
+	if mnode == nil {
+		nDB.Unlock()
+		logrus.Infof("failed bulkSyncNode for %v with node %v unsolicited:%v - err: destination node not found", network, node, unsolicited)
+		return &errNodeNotFound{node}
+	}
+	// if the message is not unsolicited means that some other node asked for a sync
+	// so also if there is another pending sync happening with that node we still want to reply to avoid
+	// that the sender fails
+	var ch chan struct{}
+	if unsolicited {
+		_, ok := nDB.bulkSyncAckTbl[node]
+		if ok {
+			nDB.Unlock()
+			logrus.Infof("failed bulkSyncNode for %v with node %v unsolicited:%v - err: destination node busy", network, node, unsolicited)
+			return &errSyncPending{node}
+		}
+		ch = make(chan struct{})
+		nDB.bulkSyncAckTbl[node] = ch
+		logrus.Infof("bulkSyncNode for %v with node %v unsolicited:%v created channel %p", network, node, unsolicited, ch)
+		defer func() {
+			// at the end of this function make sure that the channel is always removed
+			nDB.Lock()
+			ch, ok := nDB.bulkSyncAckTbl[node]
+			if !ok {
+				logrus.Infof("bulkSyncNode for %v with node %v unsolicited:%v WEIRD no channel", network, node, unsolicited)
+			}
+			delete(nDB.bulkSyncAckTbl, node)
+			if ok {
+				logrus.Infof("bulkSyncNode for %v with node %v unsolicited:%v deleted channel %p", network, node, unsolicited, ch)
+			}
+			nDB.Unlock()
+		}()
+	}
+	nDB.Unlock()
 
+	var msgs [][]byte
 	var unsolMsg string
 	if unsolicited {
 		unsolMsg = "unsolicited"
 	}
 
-	logrus.Debugf("%v(%v): Initiating %s bulk sync for networks %v with node %s",
-		nDB.config.Hostname, nDB.config.NodeID, unsolMsg, networks, node)
+	logrus.Debugf("%v(%v): Initiating %s bulk sync node for network %v with node %s",
+		nDB.config.Hostname, nDB.config.NodeID, unsolMsg, network, node)
 
 	nDB.RLock()
-	mnode := nDB.nodes[node]
-	if mnode == nil {
-		nDB.RUnlock()
-		return nil
-	}
 
-	for _, nid := range networks {
-		nDB.indexes[byNetwork].WalkPrefix(fmt.Sprintf("/%s", nid), func(path string, v interface{}) bool {
-			entry, ok := v.(*entry)
-			if !ok {
-				return false
-			}
-
-			eType := TableEventTypeCreate
-			if entry.deleting {
-				eType = TableEventTypeDelete
-			}
-
-			params := strings.Split(path[1:], "/")
-			tEvent := TableEvent{
-				Type:      eType,
-				LTime:     entry.ltime,
-				NodeName:  entry.node,
-				NetworkID: nid,
-				TableName: params[1],
-				Key:       params[2],
-				Value:     entry.value,
-				// The duration in second is a float that below would be truncated
-				ResidualReapTime: int32(entry.reapTime.Seconds()),
-			}
-
-			msg, err := encodeMessage(MessageTypeTableEvent, &tEvent)
-			if err != nil {
-				logrus.Errorf("Encode failure during bulk sync: %#v", tEvent)
-				return false
-			}
-
-			msgs = append(msgs, msg)
+	nDB.indexes[byNetwork].WalkPrefix(fmt.Sprintf("/%s", network), func(path string, v interface{}) bool {
+		entry, ok := v.(*entry)
+		if !ok {
 			return false
-		})
-	}
+		}
+
+		eType := TableEventTypeCreate
+		if entry.deleting {
+			eType = TableEventTypeDelete
+		}
+
+		params := strings.Split(path[1:], "/")
+		tEvent := TableEvent{
+			Type:      eType,
+			LTime:     entry.ltime,
+			NodeName:  entry.node,
+			NetworkID: network,
+			TableName: params[1],
+			Key:       params[2],
+			Value:     entry.value,
+			// The duration in second is a float that below would be truncated
+			ResidualReapTime: int32(entry.reapTime.Seconds()),
+		}
+
+		msg, err := encodeMessage(MessageTypeTableEvent, &tEvent)
+		if err != nil {
+			logrus.Errorf("Encode failure during bulk sync: %#v", tEvent)
+			return false
+		}
+
+		msgs = append(msgs, msg)
+		return false
+	})
 	nDB.RUnlock()
 
 	// Create a compound message
@@ -670,7 +698,7 @@ func (nDB *NetworkDB) bulkSyncNode(networks []string, node string, unsolicited b
 		LTime:       nDB.tableClock.Time(),
 		Unsolicited: unsolicited,
 		NodeName:    nDB.config.NodeID,
-		Networks:    networks,
+		Networks:    []string{network},
 		Payload:     compound,
 	}
 
@@ -679,51 +707,33 @@ func (nDB *NetworkDB) bulkSyncNode(networks []string, node string, unsolicited b
 		return fmt.Errorf("failed to encode bulk sync message: %v", err)
 	}
 
-	nDB.Lock()
-	ch := make(chan struct{})
-	nDB.bulkSyncAckTbl[node] = ch
-	nDB.Unlock()
-
 	err = nDB.memberlist.SendReliable(&mnode.Node, buf)
 	if err != nil {
-		nDB.Lock()
-		delete(nDB.bulkSyncAckTbl, node)
-		nDB.Unlock()
-
 		return fmt.Errorf("failed to send a TCP message during bulk sync: %v", err)
 	}
 
 	// Wait on a response only if it is unsolicited.
 	if unsolicited {
 		startTime := time.Now()
-		t := time.NewTimer(30 * time.Second)
+		t := time.NewTimer(bulkSyncMaxWait)
 		select {
 		case <-t.C:
-			logrus.Errorf("Bulk sync to node %s timed out", node)
+			err = &errBulkFailedTimeout{node, network, bulkSyncMaxWait}
+			logrus.Error(err)
 			bulkSyncReplyFailures.Inc(1)
 		case <-ch:
-			logrus.Debugf("%v(%v): Bulk sync to node %s took %s", nDB.config.Hostname, nDB.config.NodeID, node, time.Since(startTime))
+			logrus.Infof("%v(%v): Bulk sync network %v to node %s took %s", nDB.config.Hostname, nDB.config.NodeID, network, node, time.Since(startTime))
 			bulkSyncReplySuccess.UpdateSince(startTime)
 		}
 		t.Stop()
 	}
 
-	return nil
+	return err
 }
 
 // Returns a random offset between 0 and n
 func randomOffset(n int) int {
-	if n == 0 {
-		return 0
-	}
-
-	val, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
-	if err != nil {
-		logrus.Errorf("Failed to get a random offset: %v", err)
-		return 0
-	}
-
-	return int(val.Int64())
+	return rand.Intn(n)
 }
 
 // mRandomNodes is used to select up to m random nodes. It is possible

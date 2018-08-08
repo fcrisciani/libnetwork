@@ -618,7 +618,6 @@ func (nDB *NetworkDB) JoinNetwork(nid string) error {
 		RetransmitMult: 4,
 	}
 	nDB.addNetworkNode(nid, nDB.config.NodeID)
-	networkNodes := nDB.networkNodes[nid]
 	n = nodeNetworks[nid]
 	nDB.Unlock()
 
@@ -628,7 +627,7 @@ func (nDB *NetworkDB) JoinNetwork(nid string) error {
 	}
 
 	logrus.Debugf("%v(%v): joined network %s", nDB.config.Hostname, nDB.config.NodeID, nid)
-	if _, err := nDB.bulkSync(networkNodes, true); err != nil {
+	if err := nDB.bulkSyncNetwork(nid, true); err != nil {
 		logrus.Errorf("Error bulk syncing while joining network %s: %v", nid, err)
 	}
 	logrus.Debugf("%v(%v): joined network %s - sync done", nDB.config.Hostname, nDB.config.NodeID, nid)

@@ -1,7 +1,6 @@
 package networkdb
 
 import (
-	"net"
 	"time"
 
 	"github.com/Sirupsen/logrus"
@@ -340,34 +339,34 @@ func (nDB *NetworkDB) handleBulkSync(buf []byte) {
 		return
 	}
 
+	//TODO check where is this tableClock used
 	if bsm.LTime > 0 {
 		nDB.tableClock.Witness(bsm.LTime)
 	}
-
+	logrus.Infof("%v(%v): HANDLE bulk sync for network %v from node %v unsolicited:%v processing messages", nDB.config.Hostname, nDB.config.NodeID, bsm.Networks, bsm.NodeName, bsm.Unsolicited)
 	nDB.handleMessage(bsm.Payload, true)
 
-	// Don't respond to a bulk sync which was not unsolicited
-	if !bsm.Unsolicited {
+	// If unsolicited the other side is waiting for a reply
+	if bsm.Unsolicited {
+		if len(bsm.Networks) > 0 {
+			logrus.Infof("%v(%v): HANDLE bulk sync for network %v from node %v unsolicited:%v sending reply", nDB.config.Hostname, nDB.config.NodeID, bsm.Networks, bsm.NodeName, bsm.Unsolicited)
+			// in previous version of the code it was being passed a set of networks, recent change instead
+			// force the bulk sync to only one network at the time.
+			if err := nDB.bulkSyncNode(bsm.Networks[0], bsm.NodeName, false); err != nil {
+				logrus.Errorf("Error in responding to bulk sync to node %s: %v", bsm.NodeName, err)
+			}
+		}
+	} else {
+		// Received the reply from a node that I contacted
 		nDB.Lock()
+		logrus.Infof("%v(%v): HANDLE got a response for bulk sync for network %v from node %v unsolicited:%v", nDB.config.Hostname, nDB.config.NodeID, bsm.Networks, bsm.NodeName, bsm.Unsolicited)
 		ch, ok := nDB.bulkSyncAckTbl[bsm.NodeName]
 		if ok {
 			close(ch)
-			delete(nDB.bulkSyncAckTbl, bsm.NodeName)
+			// the other code will take care of the map cleanup
+			logrus.Infof("%v(%v): HANDLE bulk sync for network %v from node %v unsolicited:%v, closing %p", nDB.config.Hostname, nDB.config.NodeID, bsm.Networks, bsm.NodeName, bsm.Unsolicited, ch)
 		}
 		nDB.Unlock()
-
-		return
-	}
-
-	var nodeAddr net.IP
-	nDB.RLock()
-	if node, ok := nDB.nodes[bsm.NodeName]; ok {
-		nodeAddr = node.Addr
-	}
-	nDB.RUnlock()
-
-	if err := nDB.bulkSyncNode(bsm.Networks, bsm.NodeName, false); err != nil {
-		logrus.Errorf("Error in responding to bulk sync from node %s: %v", nodeAddr, err)
 	}
 }
 
